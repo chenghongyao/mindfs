@@ -37,6 +37,14 @@ export type SessionSummary = {
   closed_at?: string;
 };
 
+export type CurrentSession = {
+  key: string;
+  name: string;
+  type: "chat" | "view" | "skill";
+  status: "active" | "idle" | "closed";
+  agent: string;
+};
+
 export function buildDefaultTree(
   rootEntries: FileEntry[],
   childrenByPath: Record<string, FileEntry[]>,
@@ -53,6 +61,9 @@ export function buildDefaultTree(
   sessions?: SessionSummary[],
   selectedSession?: SessionSummary | null,
   onSelectSession?: ((session: SessionSummary) => void) | null,
+  currentSession?: CurrentSession | null,
+  onSendMessage?: ((message: string, mode: "chat" | "view" | "skill", agent: string) => void) | null,
+  onSessionClick?: (() => void) | null,
   rightCollapsed?: boolean,
   onToggleRight?: (() => void) | null,
   onOpenSettings?: (() => void) | null,
@@ -161,6 +172,9 @@ export function buildDefaultTree(
       pendingView: pendingView ?? false,
       onAcceptView: onAcceptView ?? undefined,
       onRevertView: onRevertView ?? undefined,
+      currentSession: currentSession ?? null,
+      onSendMessage: onSendMessage ?? undefined,
+      onSessionClick: onSessionClick ?? undefined,
     },
   };
 

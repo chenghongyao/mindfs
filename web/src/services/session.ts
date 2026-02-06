@@ -149,11 +149,10 @@ class SessionService {
     agent: string
   ): Promise<Session | null> {
     try {
-      const res = await fetch("/api/sessions", {
+      const res = await fetch(`/api/sessions?root=${encodeURIComponent(rootId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          root_id: rootId,
           type,
           agent,
         }),

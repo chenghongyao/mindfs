@@ -41,7 +41,11 @@ func Start(ctx context.Context, addr, root string) error {
 	}
 
 	sessionStores := session.NewStoreManager()
-	sessionService := &api.SessionService{Stores: sessionStores}
+	sessionService := &api.SessionService{
+		Stores:   sessionStores,
+		Root:     root,
+		Registry: registry,
+	}
 	agentConfig, _ := agent.LoadConfig("")
 	agentPool := agent.NewPool(agentConfig)
 	agentProber := agent.NewProber(&agentConfig, 5*time.Minute)

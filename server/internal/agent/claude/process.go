@@ -23,8 +23,11 @@ type Process struct {
 }
 
 // Start spawns a Claude process with stream-json format.
-func Start(ctx context.Context, args []string, cwd string, env map[string]string) (*Process, error) {
-	cmd := exec.CommandContext(ctx, "claude", args...)
+func Start(ctx context.Context, command string, args []string, cwd string, env map[string]string) (*Process, error) {
+	if command == "" {
+		command = "claude"
+	}
+	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

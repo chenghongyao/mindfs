@@ -12,6 +12,7 @@ import { registry } from "./renderer/registry";
 import { ActionClient } from "./services/actions";
 import { applyViewUpdate } from "./services/viewUpdates";
 import { mergeViewIntoShell } from "./renderer/merge";
+import { sessionService, type Session } from "./services/session";
 
 type ManagedDir = {
   id: string;
@@ -42,6 +43,7 @@ export function App() {
   const expandedRef = useRef<string[]>([]);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
+  const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -137,6 +139,25 @@ export function App() {
     setFile(null);
   }, []);
 
+  const handleSendMessage = useCallback(
+    async (message: string, mode: "chat" | "view" | "skill", agent: string) => {
+      if (!currentRootId) return;
+      let session = currentSession;
+      if (
+        !session ||
+        session.status === "closed" ||
+        session.type !== mode ||
+        session.agent !== agent
+      ) {
+        session = await sessionService.createSession(currentRootId, mode, agent);
+        if (!session) return;
+        setCurrentSession(session);
+      }
+      await sessionService.sendMessage(currentRootId, session.key, message);
+    },
+    [currentRootId, currentSession]
+  );
+
   const handleToggleRight = useCallback(() => {
     setRightCollapsed((prev) => !prev);
   }, []);
@@ -164,6 +185,25 @@ export function App() {
         sessions,
         selectedSession,
         handleSelectSession,
+        currentSession
+          ? {
+              key: currentSession.key,
+              name: currentSession.name,
+              type: currentSession.type,
+              status: currentSession.status,
+              agent: currentSession.agent,
+            }
+          : null,
+        handleSendMessage,
+        () => {
+          if (currentSession) {
+            setSelectedSession({
+              session_key: currentSession.key,
+              agent: currentSession.agent,
+            });
+            setFile(null);
+          }
+        },
         rightCollapsed,
         handleToggleRight,
         handleOpenSettings,
@@ -184,6 +224,8 @@ export function App() {
       handleRevertView,
       sessions,
       selectedSession,
+      currentSession,
+      handleSendMessage,
       rightCollapsed,
       handleSelectSession,
       handleToggleRight,
@@ -275,6 +317,7 @@ export function App() {
 
   useEffect(() => {
     if (!currentRootId) return;
+    sessionService.connect(currentRootId);
     let cancelled = false;
     const loadSessions = async () => {
       try {
@@ -284,6 +327,12 @@ export function App() {
         if (cancelled) return;
         const list = Array.isArray(payload.sessions) ? payload.sessions : [];
         setSessions(list);
+        if (currentSession) {
+          const refreshed = list.find((s: any) => s.key === currentSession.key);
+          if (refreshed) {
+            setCurrentSession(refreshed as Session);
+          }
+        }
       } catch {
         // ignore
       }
@@ -324,8 +373,9 @@ export function App() {
       cancelled = true;
       window.clearInterval(timer);
       window.clearInterval(sessionTimer);
+      sessionService.disconnect();
     };
-  }, [currentRootId, viewTree]);
+  }, [currentRootId, viewTree, currentSession]);
 
   return (
     <JSONUIProvider

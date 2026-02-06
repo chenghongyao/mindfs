@@ -10,7 +10,6 @@ import (
 	"github.com/gorilla/websocket"
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/agent/acp"
-	"mindfs/server/internal/audit"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/router"
 	"mindfs/server/internal/session"
@@ -26,7 +25,6 @@ type WSHandler struct {
 	Sessions  *SessionService
 	Agents    *agent.Pool
 	TaskQueue *agent.TaskQueue
-	Audit     *audit.WriterPool
 	watcherMu sync.Mutex
 	watchers  map[string]*fs.FileWatcher
 	connMu    sync.RWMutex
@@ -197,33 +195,20 @@ func (h *WSHandler) handleWSRequest(ctx context.Context, conn *websocket.Conn, r
 }
 
 func (h *WSHandler) handleSessionCreate(ctx context.Context, conn *websocket.Conn, req WSRequest) {
-	manager, err := h.getSessionManager(getString(req.Payload, "root_id"))
-	if err != nil {
-		h.sendWSError(conn, req.ID, "session.unavailable", err.Error())
-		return
-	}
+	rootID := getString(req.Payload, "root_id")
 	input := session.CreateInput{
 		Key:   getString(req.Payload, "key"),
 		Type:  getString(req.Payload, "type"),
 		Agent: getString(req.Payload, "agent"),
 		Name:  getString(req.Payload, "name"),
 	}
-	created, err := manager.Create(ctx, input)
+	created, resolved, err := h.Sessions.CreateSession(ctx, rootID, input)
 	if err != nil {
 		h.sendWSError(conn, req.ID, "session.create_failed", err.Error())
 		return
 	}
-	rootID := getString(req.Payload, "root_id")
-	if rootPath, managedDir, err := h.resolveRootPaths(rootID); err == nil {
-		h.startWatcher(ctx, rootID, created.Key, rootPath, managedDir)
-	}
-
-	// Audit log
-	if logger := h.getAuditLogger(rootID); logger != nil {
-		_ = logger.LogSession(audit.ActionSessionCreate, audit.ActorUser, created.Key, created.Agent, map[string]any{
-			"type": created.Type,
-			"name": created.Name,
-		})
+	if resolved != nil {
+		h.startWatcher(ctx, rootID, created.Key, resolved.Path, resolved.ManagedDir)
 	}
 
 	h.sendWS(conn, WSResponse{
@@ -237,21 +222,21 @@ func (h *WSHandler) handleSessionCreate(ctx context.Context, conn *websocket.Con
 }
 
 func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Conn, req WSRequest) {
-	manager, err := h.getSessionManager(getString(req.Payload, "root_id"))
-	if err != nil {
-		h.sendWSError(conn, req.ID, "session.unavailable", err.Error())
-		return
-	}
+	rootID := getString(req.Payload, "root_id")
 	key := getString(req.Payload, "session_key")
 	content := getString(req.Payload, "content")
 	if key == "" || content == "" {
 		h.sendWSError(conn, req.ID, "invalid_request", "session_key and content required")
 		return
 	}
-	if _, err := manager.AddExchange(ctx, key, "user", content); err != nil {
+
+	// 添加用户消息（审计日志在 SessionService 中处理）
+	_, resolved, err := h.Sessions.AddMessage(ctx, rootID, key, "user", content)
+	if err != nil {
 		h.sendWSError(conn, req.ID, "session.not_found", err.Error())
 		return
 	}
+
 	if h.Agents == nil {
 		h.sendWS(conn, WSResponse{
 			ID:   req.ID,
@@ -262,31 +247,34 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		})
 		return
 	}
-	sessionItem, err := manager.Get(ctx, key)
+
+	sessionItem, err := h.Sessions.GetSession(ctx, rootID, key)
 	if err != nil {
 		h.sendWSError(conn, req.ID, "session.not_found", err.Error())
 		return
 	}
-	rootID := getString(req.Payload, "root_id")
-	resolved, err := resolveRoot(rootID, h.Root, h.Registry)
-	if err != nil {
-		h.sendWSError(conn, req.ID, "session.unavailable", err.Error())
-		return
+
+	if resolved != nil {
+		h.startWatcher(ctx, rootID, sessionItem.Key, resolved.Path, resolved.ManagedDir)
 	}
-	h.startWatcher(ctx, rootID, sessionItem.Key, resolved.Path, resolved.ManagedDir)
+
 	proc, err := h.Agents.GetOrCreate(ctx, sessionItem.Key, sessionItem.Agent, resolved.Path)
 	if err != nil {
 		h.sendWSError(conn, req.ID, "agent.not_available", err.Error())
 		return
 	}
+
+	manager, _, _ := h.Sessions.GetManager(rootID)
 	var responseText string
 	err = proc.SendMessage(ctx, content, func(update acp.SessionUpdate) {
 		// Convert to legacy chunk format for backward compatibility
 		chunk := updateToChunk(update)
 		if chunk.Content != "" {
 			responseText += chunk.Content
-			for _, path := range agent.ExtractFilePaths(chunk.Content) {
-				h.recordSessionFile(ctx, manager, sessionItem.Key, resolved.Path, resolved.ManagedDir, path)
+			if resolved != nil && manager != nil {
+				for _, path := range agent.ExtractFilePaths(chunk.Content) {
+					h.recordSessionFile(ctx, manager, sessionItem.Key, resolved.Path, resolved.ManagedDir, path)
+				}
 			}
 		}
 		h.sendWS(conn, WSResponse{
@@ -301,7 +289,12 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		h.sendWSError(conn, req.ID, "agent.timeout", err.Error())
 		return
 	}
-	_, _ = manager.AddExchange(ctx, key, "agent", responseText)
+
+	// 添加 agent 响应
+	if manager != nil {
+		_, _ = manager.AddExchange(ctx, key, "agent", responseText)
+	}
+
 	h.sendWS(conn, WSResponse{
 		ID:   req.ID,
 		Type: "session.done",
@@ -312,31 +305,23 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 }
 
 func (h *WSHandler) handleSessionClose(ctx context.Context, conn *websocket.Conn, req WSRequest) {
-	manager, err := h.getSessionManager(getString(req.Payload, "root_id"))
-	if err != nil {
-		h.sendWSError(conn, req.ID, "session.unavailable", err.Error())
-		return
-	}
+	rootID := getString(req.Payload, "root_id")
 	key := getString(req.Payload, "session_key")
 	if key == "" {
 		h.sendWSError(conn, req.ID, "invalid_request", "session_key required")
 		return
 	}
-	closed, err := manager.Close(ctx, key)
+
+	closed, err := h.Sessions.CloseSession(ctx, rootID, key)
 	if err != nil {
 		h.sendWSError(conn, req.ID, "session.not_found", err.Error())
 		return
 	}
+
 	if h.Agents != nil {
 		h.Agents.Close(closed.Key)
 	}
 	h.stopWatcher(closed.Key)
-
-	// Audit log
-	rootID := getString(req.Payload, "root_id")
-	if logger := h.getAuditLogger(rootID); logger != nil {
-		_ = logger.LogSession(audit.ActionSessionClose, audit.ActorUser, closed.Key, closed.Agent, nil)
-	}
 
 	h.sendWS(conn, WSResponse{
 		ID:   req.ID,
@@ -346,32 +331,6 @@ func (h *WSHandler) handleSessionClose(ctx context.Context, conn *websocket.Conn
 			"summary":     closed.Summary,
 		},
 	})
-}
-
-func (h *WSHandler) getAuditLogger(rootID string) *audit.Logger {
-	if h.Audit == nil {
-		return nil
-	}
-	resolved, err := resolveRoot(rootID, h.Root, h.Registry)
-	if err != nil {
-		return nil
-	}
-	return audit.NewLogger(h.Audit, rootID, resolved.ManagedDir)
-}
-
-func (h *WSHandler) getSessionManager(rootID string) (*session.Manager, error) {
-	if h.Sessions == nil || h.Sessions.Stores == nil {
-		return nil, errServiceUnavailable("session store not configured")
-	}
-	resolved, err := resolveRoot(rootID, h.Root, h.Registry)
-	if err != nil {
-		return nil, err
-	}
-	store, err := h.Sessions.Stores.Get(resolved.ManagedDir)
-	if err != nil {
-		return nil, err
-	}
-	return session.NewManager(store), nil
 }
 
 func (h *WSHandler) sendWS(conn *websocket.Conn, resp WSResponse) {
@@ -436,7 +395,7 @@ func (h *WSHandler) startWatcher(ctx context.Context, rootID, sessionKey, rootPa
 		return
 	}
 	h.watcherMu.Unlock()
-	manager, err := h.getSessionManager(rootID)
+	manager, _, err := h.Sessions.GetManager(rootID)
 	if err != nil {
 		return
 	}

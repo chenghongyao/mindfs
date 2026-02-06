@@ -147,6 +147,28 @@ func (m *Manager) AddRelatedFile(_ context.Context, key string, file RelatedFile
 	return session, nil
 }
 
+func (m *Manager) UpdateAgentSessionID(_ context.Context, key string, agentSessionID string) (*Session, error) {
+	if m.store == nil {
+		return nil, errors.New("store not configured")
+	}
+	if strings.TrimSpace(agentSessionID) == "" {
+		return nil, errors.New("agent session id required")
+	}
+	session, err := m.store.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	if session.AgentSessionID != nil && *session.AgentSessionID == agentSessionID {
+		return session, nil
+	}
+	session.AgentSessionID = &agentSessionID
+	session.UpdatedAt = m.now().UTC()
+	if err := m.store.Save(session); err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
 func (m *Manager) Close(ctx context.Context, key string) (*Session, error) {
 	if m.store == nil {
 		return nil, errors.New("store not configured")

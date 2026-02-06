@@ -29,10 +29,10 @@ func StartProcess(ctx context.Context, def Definition, rootPath string) (Process
 
 	switch def.Protocol {
 	case ProtocolStreamJSON:
-		return claude.Start(ctx, args, cwd, def.Env)
+		return claude.Start(ctx, def.Command, args, cwd, def.Env)
 
 	case ProtocolACP:
-		proc, err := gemini.Start(ctx, args, cwd, def.Env)
+		proc, err := gemini.Start(ctx, def.Command, args, cwd, def.Env)
 		if err != nil {
 			return nil, err
 		}
@@ -48,7 +48,7 @@ func StartProcess(ctx context.Context, def Definition, rootPath string) (Process
 		return proc, nil
 
 	case ProtocolMCP:
-		proc, err := codex.Start(ctx, args, cwd, def.Env)
+		proc, err := codex.Start(ctx, def.Command, args, cwd, def.Env)
 		if err != nil {
 			return nil, err
 		}

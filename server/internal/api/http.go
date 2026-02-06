@@ -12,7 +12,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"mindfs/server/internal/agent"
-	"mindfs/server/internal/audit"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/router"
 )
@@ -25,7 +24,6 @@ type HTTPHandler struct {
 	Registry *fs.Registry
 	Sessions *SessionService
 	Prober   *agent.Prober
-	Audit    *audit.WriterPool
 }
 
 // Routes constructs the chi router with all endpoints.
@@ -41,7 +39,6 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/sessions", h.handleSessions)
 	r.Get("/api/sessions/{key}", h.handleSessionGet)
 	r.Post("/api/sessions", h.handleSessionCreate)
-	r.Post("/api/sessions/{key}/message", h.handleSessionMessage)
 	r.Post("/api/skills/{id}/execute", h.handleSkillExecute)
 	r.Get("/api/dirs/{id}/config", h.handleDirConfigGet)
 	r.Put("/api/dirs/{id}/config", h.handleDirConfigPut)
@@ -64,18 +61,6 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Mount("/api/view", viewHandler.Routes())
 
 	return r
-}
-
-// getAuditLogger returns an audit logger for the given root ID
-func (h *HTTPHandler) getAuditLogger(rootID string) *audit.Logger {
-	if h.Audit == nil {
-		return nil
-	}
-	resolved, err := resolveRoot(rootID, h.Root, h.Registry)
-	if err != nil {
-		return nil
-	}
-	return audit.NewLogger(h.Audit, rootID, resolved.ManagedDir)
 }
 
 func (h *HTTPHandler) handleIndex(w http.ResponseWriter, _ *http.Request) {

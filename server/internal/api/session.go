@@ -1,44 +1,161 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"mindfs/server/internal/audit"
+	"mindfs/server/internal/fs"
 	"mindfs/server/internal/session"
 )
 
+// SessionService 提供统一的 session 操作，供 HTTP 和 WebSocket handler 共用
 type SessionService struct {
-	Stores *session.StoreManager
+	Stores   *session.StoreManager
+	Root     string
+	Registry *fs.Registry
+	Audit    *audit.WriterPool
 }
 
-func (h *HTTPHandler) getSessionManager(rootID string) (*session.Manager, error) {
-	if h.Sessions == nil || h.Sessions.Stores == nil {
-		return nil, errServiceUnavailable("session store not configured")
-	}
-	resolved, err := resolveRoot(rootID, h.Root, h.Registry)
-	if err != nil {
-		return nil, err
-	}
-	store, err := h.Sessions.Stores.Get(resolved.ManagedDir)
-	if err != nil {
-		return nil, err
-	}
-	return session.NewManager(store), nil
+// ResolvedRoot 包含解析后的 root 路径信息
+type ResolvedRoot struct {
+	RootID     string
+	Path       string
+	ManagedDir string
 }
+
+// Resolve 解析 rootID 到具体路径
+func (s *SessionService) Resolve(rootID string) (*ResolvedRoot, error) {
+	resolved, err := resolveRoot(rootID, s.Root, s.Registry)
+	if err != nil {
+		return nil, err
+	}
+	return &ResolvedRoot{
+		RootID:     rootID,
+		Path:       resolved.Path,
+		ManagedDir: resolved.ManagedDir,
+	}, nil
+}
+
+// GetManager 获取指定 root 的 session manager
+func (s *SessionService) GetManager(rootID string) (*session.Manager, *ResolvedRoot, error) {
+	if s.Stores == nil {
+		return nil, nil, errServiceUnavailable("session store not configured")
+	}
+	resolved, err := s.Resolve(rootID)
+	if err != nil {
+		return nil, nil, err
+	}
+	store, err := s.Stores.Get(resolved.ManagedDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	return session.NewManager(store), resolved, nil
+}
+
+// GetAuditLogger 获取审计日志记录器
+func (s *SessionService) GetAuditLogger(rootID string) *audit.Logger {
+	if s.Audit == nil {
+		return nil
+	}
+	resolved, err := s.Resolve(rootID)
+	if err != nil {
+		return nil
+	}
+	return audit.NewLogger(s.Audit, rootID, resolved.ManagedDir)
+}
+
+// CreateSession 创建新 session
+func (s *SessionService) CreateSession(ctx context.Context, rootID string, input session.CreateInput) (*session.Session, *ResolvedRoot, error) {
+	manager, resolved, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, nil, err
+	}
+	created, err := manager.Create(ctx, input)
+	if err != nil {
+		return nil, resolved, err
+	}
+
+	// 审计日志
+	if logger := s.GetAuditLogger(rootID); logger != nil {
+		_ = logger.LogSession(audit.ActionSessionCreate, audit.ActorUser, created.Key, created.Agent, map[string]any{
+			"type": created.Type,
+			"name": created.Name,
+		})
+	}
+
+	return created, resolved, nil
+}
+
+// AddMessage 添加消息到 session
+func (s *SessionService) AddMessage(ctx context.Context, rootID, sessionKey, role, content string) (*session.Session, *ResolvedRoot, error) {
+	manager, resolved, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, nil, err
+	}
+	updated, err := manager.AddExchange(ctx, sessionKey, role, content)
+	if err != nil {
+		return nil, resolved, err
+	}
+
+	// 审计日志
+	if logger := s.GetAuditLogger(rootID); logger != nil {
+		_ = logger.LogSession(audit.ActionSessionMessage, audit.ActorUser, sessionKey, updated.Agent, map[string]any{
+			"content_length": len(content),
+			"role":           role,
+		})
+	}
+
+	return updated, resolved, nil
+}
+
+// GetSession 获取 session
+func (s *SessionService) GetSession(ctx context.Context, rootID, sessionKey string) (*session.Session, error) {
+	manager, _, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, err
+	}
+	return manager.Get(ctx, sessionKey)
+}
+
+// ListSessions 列出所有 session
+func (s *SessionService) ListSessions(ctx context.Context, rootID string) ([]*session.Session, error) {
+	manager, _, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, err
+	}
+	return manager.List(ctx)
+}
+
+// CloseSession 关闭 session
+func (s *SessionService) CloseSession(ctx context.Context, rootID, sessionKey string) (*session.Session, error) {
+	manager, _, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, err
+	}
+	closed, err := manager.Close(ctx, sessionKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// 审计日志
+	if logger := s.GetAuditLogger(rootID); logger != nil {
+		_ = logger.LogSession(audit.ActionSessionClose, audit.ActorUser, sessionKey, closed.Agent, nil)
+	}
+
+	return closed, nil
+}
+
+// ============ HTTP Handlers ============
 
 func (h *HTTPHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
-	manager, err := h.getSessionManager(rootID)
+	sessions, err := h.Sessions.ListSessions(r.Context(), rootID)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err)
-		return
-	}
-	sessions, err := manager.List(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	payload := make([]map[string]any, 0, len(sessions))
@@ -51,17 +168,12 @@ func (h *HTTPHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 
 func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
-	manager, err := h.getSessionManager(rootID)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err)
-		return
-	}
 	key := chi.URLParam(r, "key")
 	if strings.TrimSpace(key) == "" {
 		writeError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
 		return
 	}
-	sessionItem, err := manager.Get(r.Context(), key)
+	sessionItem, err := h.Sessions.GetSession(r.Context(), rootID, key)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err)
 		return
@@ -72,11 +184,6 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 
 func (h *HTTPHandler) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
-	manager, err := h.getSessionManager(rootID)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err)
-		return
-	}
 	var req struct {
 		Key   string `json:"key"`
 		Type  string `json:"type"`
@@ -87,7 +194,7 @@ func (h *HTTPHandler) handleSessionCreate(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
 		return
 	}
-	created, err := manager.Create(r.Context(), session.CreateInput{
+	created, _, err := h.Sessions.CreateSession(r.Context(), rootID, session.CreateInput{
 		Key:   req.Key,
 		Type:  req.Type,
 		Agent: req.Agent,
@@ -97,59 +204,11 @@ func (h *HTTPHandler) handleSessionCreate(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-
-	// Audit log
-	if logger := h.getAuditLogger(rootID); logger != nil {
-		_ = logger.LogSession(audit.ActionSessionCreate, audit.ActorUser, created.Key, created.Agent, map[string]any{
-			"type": created.Type,
-			"name": created.Name,
-		})
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"session": sessionResponse(created)})
 }
 
-func (h *HTTPHandler) handleSessionMessage(w http.ResponseWriter, r *http.Request) {
-	rootID := r.URL.Query().Get("root")
-	manager, err := h.getSessionManager(rootID)
-	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, err)
-		return
-	}
-	key := chi.URLParam(r, "key")
-	if strings.TrimSpace(key) == "" {
-		writeError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
-		return
-	}
-	var req struct {
-		Content string         `json:"content"`
-		Context map[string]any `json:"context"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
-		return
-	}
-	if strings.TrimSpace(req.Content) == "" {
-		writeError(w, http.StatusBadRequest, errInvalidRequest("content required"))
-		return
-	}
-	updated, err := manager.AddExchange(r.Context(), key, "user", req.Content)
-	if err != nil {
-		writeError(w, http.StatusNotFound, err)
-		return
-	}
-
-	// Audit log
-	if logger := h.getAuditLogger(rootID); logger != nil {
-		_ = logger.LogSession(audit.ActionSessionMessage, audit.ActorUser, key, updated.Agent, map[string]any{
-			"content_length": len(req.Content),
-		})
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"session": sessionResponse(updated)})
-}
+// ============ 辅助函数 ============
 
 func sessionResponse(s *session.Session) map[string]any {
 	if s == nil {
@@ -163,13 +222,13 @@ func sessionResponse(s *session.Session) map[string]any {
 		"agent_session_id": s.AgentSessionID,
 		"name":             s.Name,
 		"status":           s.Status,
-		"summary":           s.Summary,
-		"exchanges":         s.Exchanges,
-		"related_files":     s.RelatedFiles,
-		"generated_view":    s.GeneratedView,
-		"created_at":        s.CreatedAt,
-		"updated_at":        s.UpdatedAt,
-		"closed_at":         s.ClosedAt,
+		"summary":          s.Summary,
+		"exchanges":        s.Exchanges,
+		"related_files":    s.RelatedFiles,
+		"generated_view":   s.GeneratedView,
+		"created_at":       s.CreatedAt,
+		"updated_at":       s.UpdatedAt,
+		"closed_at":        s.ClosedAt,
 	}
 }
 

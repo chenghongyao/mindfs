@@ -53,8 +53,11 @@ type Process struct {
 }
 
 // Start spawns a Codex process with MCP server mode.
-func Start(ctx context.Context, args []string, cwd string, env map[string]string) (*Process, error) {
-	cmd := exec.CommandContext(ctx, "codex", args...)
+func Start(ctx context.Context, command string, args []string, cwd string, env map[string]string) (*Process, error) {
+	if command == "" {
+		command = "codex"
+	}
+	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

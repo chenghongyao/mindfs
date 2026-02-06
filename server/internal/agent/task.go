@@ -86,8 +86,6 @@ func (q *TaskQueue) notifyListeners(update TaskUpdate) {
 // Add adds a new task to the queue
 func (q *TaskQueue) Add(task *Task) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-
 	// Remove oldest tasks if queue is full
 	for len(q.queue) >= q.maxTasks {
 		oldestID := q.queue[0]
@@ -99,12 +97,14 @@ func (q *TaskQueue) Add(task *Task) {
 	task.Status = TaskStatusPending
 	q.tasks[task.ID] = task
 	q.queue = append(q.queue, task.ID)
-
-	q.notifyListeners(TaskUpdate{
+	update := TaskUpdate{
 		TaskID:   task.ID,
 		Status:   task.Status,
 		Progress: task.Progress,
-	})
+	}
+	q.mu.Unlock()
+
+	q.notifyListeners(update)
 }
 
 // Get returns a task by ID

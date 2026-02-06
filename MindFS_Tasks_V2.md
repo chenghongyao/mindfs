@@ -719,6 +719,16 @@ Status: `[ ]` 待做, `[~]` 进行中, `[X]` 已完成, `[-]` 废弃
 
 ---
 
+## Phase 10: 待优化 (Backlog)
+
+- [ ] T1001 [P2] 优化多 Session 文件监控
+  - **问题**: 多个 active session 时，每个 session 创建独立 FileWatcher 监控同一 rootPath，浪费资源
+  - **问题**: 多个 session 同时写同一文件时，file-meta 归属不确定
+  - **方案**: 改为每个 rootPath 一个 watcher，根据 Agent 进程实际输出判断文件归属
+  - **涉及文件**: server/internal/fs/watcher.go, server/internal/api/ws.go
+
+---
+
 ## Phase 9: 遗留任务 (从 V1 继承)
 
 **Goal**: 完成 V1 未完成的 Polish 任务

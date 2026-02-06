@@ -25,8 +25,11 @@ type Process struct {
 }
 
 // Start spawns a Gemini process with ACP mode.
-func Start(ctx context.Context, args []string, cwd string, env map[string]string) (*Process, error) {
-	cmd := exec.CommandContext(ctx, "gemini", args...)
+func Start(ctx context.Context, command string, args []string, cwd string, env map[string]string) (*Process, error) {
+	if command == "" {
+		command = "gemini"
+	}
+	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
