@@ -33,7 +33,6 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/health", h.handleHealth)
 	r.Get("/api/tree", h.handleTree)
 	r.Get("/api/file", h.handleFile)
-	r.Get("/api/view", h.handleView)
 	r.Post("/api/view/accept", h.handleViewAccept)
 	r.Post("/api/view/revert", h.handleViewRevert)
 	r.Get("/api/sessions", h.handleSessions)
@@ -58,7 +57,14 @@ func (h *HTTPHandler) Routes() http.Handler {
 
 	// View routes API
 	viewHandler := &ViewHandler{Root: h.Root, Registry: h.Registry}
-	r.Mount("/api/view", viewHandler.Routes())
+	r.Route("/api/view", func(v chi.Router) {
+		v.Get("/", h.handleView)
+		v.Get("/routes", viewHandler.handleRoutes)
+		v.Post("/switch", viewHandler.handleSwitch)
+		v.Post("/preference", viewHandler.handlePreference)
+		v.Get("/versions/{routeId}", viewHandler.handleVersions)
+		v.Post("/generate", viewHandler.handleGenerate)
+	})
 
 	return r
 }

@@ -21,13 +21,12 @@ type PreferencesStore struct {
 
 // NewPreferencesStore creates a new preferences store
 func NewPreferencesStore() (*PreferencesStore, error) {
-	homeDir, err := os.UserHomeDir()
+	configDir, err := MindFSConfigDir()
 	if err != nil {
 		return nil, err
 	}
 
-	configDir := filepath.Join(homeDir, ".config", "mindfs")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return nil, err
 	}
 

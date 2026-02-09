@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"time"
 
@@ -46,7 +47,7 @@ func Start(ctx context.Context, addr, root string) error {
 		Root:     root,
 		Registry: registry,
 	}
-	agentConfig, _ := agent.LoadConfig("")
+	agentConfig, _ := agent.LoadConfig("agents.json")
 	agentPool := agent.NewPool(agentConfig)
 	agentProber := agent.NewProber(&agentConfig, 5*time.Minute)
 	agentProber.Start(ctx)
@@ -54,15 +55,17 @@ func Start(ctx context.Context, addr, root string) error {
 	idleChecker.Start(ctx)
 
 	httpHandler := &api.HTTPHandler{Router: actionRouter, Root: root, Views: viewStores, Registry: registry, Sessions: sessionService, Prober: agentProber}
-	wsHandler := &api.WSHandler{Router: actionRouter, Root: root, Registry: registry, Sessions: sessionService, Agents: agentPool}
+	wsHandler := &api.WSHandler{Router: actionRouter, Root: root, Registry: registry, Sessions: sessionService, Agents: agentPool, Prober: agentProber}
 
 	mux := http.NewServeMux()
 	mux.Handle("/", httpHandler.Routes())
 	mux.Handle("/ws", wsHandler)
 
+	handler := api.LoggingMiddleware(mux)
+
 	server := &http.Server{
 		Addr:              addr,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -74,5 +77,6 @@ func Start(ctx context.Context, addr, root string) error {
 		_ = server.Shutdown(context.Background())
 	}()
 
+	log.Printf("[server] listening addr=%s root=%s", addr, root)
 	return server.ListenAndServe()
 }

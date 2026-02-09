@@ -2,6 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 )
@@ -40,14 +45,14 @@ func (p *Prober) Start(ctx context.Context) {
 	// 立即执行一次探测
 	p.ProbeAll(ctx)
 
-	// 启动定期探测
+	// 启动定期探测：仅重试失败状态
 	ticker := time.NewTicker(p.probeInterval)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				p.ProbeAll(ctx)
+				p.probeFailedOnly(ctx)
 			case <-p.stopCh:
 				return
 			case <-ctx.Done():
@@ -105,6 +110,34 @@ func (p *Prober) ProbeOne(ctx context.Context, name string) Status {
 	return status
 }
 
+// ReportFailure marks an agent as unavailable due to runtime interaction/probe failure.
+func (p *Prober) ReportFailure(name string, err error) {
+	msg := "unknown failure"
+	if err != nil {
+		msg = err.Error()
+	}
+	p.mu.Lock()
+	p.statuses[name] = Status{
+		Name:      name,
+		Available: false,
+		Error:     msg,
+		LastProbe: time.Now().UTC(),
+	}
+	p.mu.Unlock()
+}
+
+// ReportSuccess marks an agent as available due to successful runtime interaction.
+func (p *Prober) ReportSuccess(name string) {
+	p.mu.Lock()
+	st := p.statuses[name]
+	st.Name = name
+	st.Available = true
+	st.Error = ""
+	st.LastProbe = time.Now().UTC()
+	p.statuses[name] = st
+	p.mu.Unlock()
+}
+
 // GetStatus 获取缓存的 Agent 状态
 func (p *Prober) GetStatus(name string) (Status, bool) {
 	p.mu.RLock()
@@ -140,28 +173,114 @@ func ProbeAgent(ctx context.Context, name string, def Definition) Status {
 		status.Error = "command required"
 		return status
 	}
-	cmd := def.Command
-	args := def.ProbeArgs
-	if len(args) == 0 {
-		args = []string{"--version"}
+	if _, err := exec.LookPath(def.Command); err != nil {
+		status.Error = err.Error()
+		return status
 	}
-	probeCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+
+	probeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
-	out, err := runCommand(probeCtx, cmd, args...)
+
+	tmpRoot, err := os.MkdirTemp("", "mindfs-agent-probe-*")
 	if err != nil {
 		status.Error = err.Error()
 		return status
 	}
+	defer os.RemoveAll(tmpRoot)
+
+	pool := NewPool(Config{
+		Agents: map[string]Definition{
+			name: def,
+		},
+	})
+	defer pool.CloseAll()
+
+	sessionKey := "probe-" + time.Now().UTC().Format("20060102-150405")
+	sess, err := pool.GetOrCreate(probeCtx, sessionKey, name, tmpRoot)
+	if err != nil {
+		status.Error = err.Error()
+		return status
+	}
+
+	if err := VerifySessionInteraction(probeCtx, sess); err != nil {
+		status.Error = err.Error()
+		return status
+	}
+
 	status.Available = true
-	status.Version = parseVersion(out)
 	return status
 }
 
-// Pool 的 ProbeAll 方法保持兼容
-func (p *Pool) ProbeAll(ctx context.Context) []Status {
-	statuses := make([]Status, 0, len(p.cfg.Agents))
-	for name, def := range p.cfg.Agents {
-		statuses = append(statuses, ProbeAgent(ctx, name, def))
+func (p *Prober) probeFailedOnly(ctx context.Context) {
+	if p.cfg == nil {
+		return
 	}
-	return statuses
+	for name, def := range p.cfg.Agents {
+		p.mu.RLock()
+		st, ok := p.statuses[name]
+		p.mu.RUnlock()
+		if ok && st.Available {
+			continue
+		}
+		status := ProbeAgent(ctx, name, def)
+		p.mu.Lock()
+		p.statuses[name] = status
+		p.mu.Unlock()
+	}
+}
+
+// VerifySessionInteraction sends a deterministic ping prompt and verifies the response contains the token.
+func VerifySessionInteraction(ctx context.Context, sess Session) error {
+	if sess == nil {
+		return errors.New("session required")
+	}
+
+	token := "MINDFS_PING_TOKEN_" + time.Now().UTC().Format("150405")
+	var (
+		mu      sync.Mutex
+		text    strings.Builder
+		gotDone bool
+		doneCh  = make(chan struct{}, 1)
+	)
+
+	sess.OnUpdate(func(ev Event) {
+		switch ev.Type {
+		case EventTypeMessageChunk:
+			if chunk, ok := ev.Data.(MessageChunk); ok {
+				mu.Lock()
+				text.WriteString(chunk.Content)
+				mu.Unlock()
+			}
+		case EventTypeMessageDone:
+			mu.Lock()
+			gotDone = true
+			mu.Unlock()
+			select {
+			case doneCh <- struct{}{}:
+			default:
+			}
+		}
+	})
+
+	prompt := "Reply with EXACT text: " + token + ". No markdown, no explanation."
+	if err := sess.SendMessage(ctx, prompt); err != nil {
+		return fmt.Errorf("send message: %w", err)
+	}
+
+	select {
+	case <-doneCh:
+	case <-ctx.Done():
+		return fmt.Errorf("wait done: %w", ctx.Err())
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !gotDone {
+		return errors.New("done event not received")
+	}
+	gotText := text.String()
+	if !strings.Contains(gotText, token) {
+		return fmt.Errorf("response missing token %q: %q", token, gotText)
+	}
+	return nil
 }

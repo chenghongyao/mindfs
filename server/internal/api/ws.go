@@ -9,7 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"mindfs/server/internal/agent"
-	"mindfs/server/internal/agent/unified"
+	ctxbuilder "mindfs/server/internal/context"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/router"
 	"mindfs/server/internal/session"
@@ -24,6 +24,7 @@ type WSHandler struct {
 	Registry  *fs.Registry
 	Sessions  *SessionService
 	Agents    *agent.Pool
+	Prober    *agent.Prober
 	TaskQueue *agent.TaskQueue
 	watcherMu sync.Mutex
 	watchers  map[string]*fs.SharedFileWatcher // rootPath -> SharedFileWatcher
@@ -183,6 +184,8 @@ func (h *WSHandler) handleWSRequest(ctx context.Context, conn *websocket.Conn, r
 		h.handleSessionCreate(ctx, conn, req)
 	case "session.message":
 		h.handleSessionMessage(ctx, conn, req)
+	case "session.resume":
+		h.handleSessionResume(ctx, conn, req)
 	case "session.close":
 		h.handleSessionClose(ctx, conn, req)
 	case "task.list":
@@ -230,6 +233,17 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		return
 	}
 
+	// Read current session first so we can apply different prompt strategy
+	// for the first message vs ongoing conversation.
+	before, err := h.Sessions.GetSession(ctx, rootID, key)
+	if err != nil {
+		h.sendWSError(conn, req.ID, "session.not_found", err.Error())
+		return
+	}
+	isInitialMessage := len(before.Exchanges) == 0
+
+	clientCtx := parseClientContext(req.Payload, rootID)
+
 	// 添加用户消息（审计日志在 SessionService 中处理）
 	_, resolved, err := h.Sessions.AddMessage(ctx, rootID, key, "user", content)
 	if err != nil {
@@ -258,19 +272,28 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		h.startWatcher(ctx, rootID, sessionItem.Key, resolved.Path, resolved.ManagedDir)
 	}
 
-	proc, err := h.Agents.GetOrCreate(ctx, sessionItem.Key, sessionItem.Agent, resolved.Path)
+	sess, err := h.Agents.GetOrCreate(ctx, sessionItem.Key, sessionItem.Agent, resolved.Path)
 	if err != nil {
+		if h.Prober != nil {
+			h.Prober.ReportFailure(sessionItem.Agent, err)
+		}
 		h.sendWSError(conn, req.ID, "agent.not_available", err.Error())
 		return
 	}
 
 	manager, _, _ := h.Sessions.GetManager(rootID)
 	sharedWatcher := h.getSharedWatcher(resolved.Path)
+	prompt := content
+	if isInitialMessage {
+		prompt = h.buildInitialPrompt(sessionItem, resolved, content, clientCtx)
+	} else {
+		prompt = h.buildContinuationPrompt(content, clientCtx)
+	}
 	var responseText string
-	err = proc.SendMessage(ctx, content, func(update unified.SessionUpdate) {
+	sess.OnUpdate(func(update agent.Event) {
 		// Track file writes from ToolCall (precise tracking via ACP protocol)
-		if update.Type == unified.UpdateTypeToolCall {
-			if toolCall, ok := update.Data.(unified.ToolCall); ok {
+		if update.Type == agent.EventTypeToolCall {
+			if toolCall, ok := update.Data.(agent.ToolCall); ok {
 				if toolCall.IsWriteOperation() && resolved != nil {
 					for _, path := range toolCall.GetAffectedPaths() {
 						// Record pending write for SharedFileWatcher (precise matching)
@@ -304,9 +327,16 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 			},
 		})
 	})
+	err = sess.SendMessage(ctx, prompt)
 	if err != nil {
+		if h.Prober != nil {
+			h.Prober.ReportFailure(sessionItem.Agent, err)
+		}
 		h.sendWSError(conn, req.ID, "agent.timeout", err.Error())
 		return
+	}
+	if h.Prober != nil {
+		h.Prober.ReportSuccess(sessionItem.Agent)
 	}
 
 	// 添加 agent 响应
@@ -319,6 +349,30 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		Type: "session.done",
 		Payload: map[string]any{
 			"session_key": key,
+		},
+	})
+}
+
+func (h *WSHandler) handleSessionResume(ctx context.Context, conn *websocket.Conn, req WSRequest) {
+	rootID := getString(req.Payload, "root_id")
+	key := getString(req.Payload, "session_key")
+	if key == "" {
+		h.sendWSError(conn, req.ID, "invalid_request", "session_key required")
+		return
+	}
+
+	resumed, err := h.Sessions.ResumeSession(ctx, rootID, key)
+	if err != nil {
+		h.sendWSError(conn, req.ID, string(ErrSessionResumeFailed), err.Error())
+		return
+	}
+
+	h.sendWS(conn, WSResponse{
+		ID:   req.ID,
+		Type: "session.resumed",
+		Payload: map[string]any{
+			"session_key": resumed.Key,
+			"status":      resumed.Status,
 		},
 	})
 }
@@ -373,26 +427,26 @@ func (h *WSHandler) sendWSError(conn *websocket.Conn, id, code, message string) 
 	})
 }
 
-// updateToChunk converts a unified SessionUpdate to a legacy StreamChunk.
-func updateToChunk(update unified.SessionUpdate) agent.StreamChunk {
+// updateToChunk converts an agent Event to a legacy StreamChunk.
+func updateToChunk(update agent.Event) agent.StreamChunk {
 	switch update.Type {
-	case unified.UpdateTypeMessageChunk:
-		if chunk, ok := update.Data.(unified.MessageChunk); ok {
+	case agent.EventTypeMessageChunk:
+		if chunk, ok := update.Data.(agent.MessageChunk); ok {
 			return agent.StreamChunk{Type: "text", Content: chunk.Content}
 		}
-	case unified.UpdateTypeThoughtChunk:
-		if chunk, ok := update.Data.(unified.ThoughtChunk); ok {
+	case agent.EventTypeThoughtChunk:
+		if chunk, ok := update.Data.(agent.ThoughtChunk); ok {
 			return agent.StreamChunk{Type: "thinking", Content: chunk.Content}
 		}
-	case unified.UpdateTypeToolCall:
-		if tc, ok := update.Data.(unified.ToolCall); ok {
+	case agent.EventTypeToolCall:
+		if tc, ok := update.Data.(agent.ToolCall); ok {
 			return agent.StreamChunk{Type: "tool_call", Tool: tc.Name}
 		}
-	case unified.UpdateTypeToolUpdate:
-		if tu, ok := update.Data.(unified.ToolCallUpdate); ok {
+	case agent.EventTypeToolUpdate:
+		if tu, ok := update.Data.(agent.ToolCallUpdate); ok {
 			return agent.StreamChunk{Type: "tool_result", Content: tu.Result}
 		}
-	case unified.UpdateTypeMessageDone:
+	case agent.EventTypeMessageDone:
 		return agent.StreamChunk{Type: "done"}
 	}
 	return agent.StreamChunk{}
@@ -503,6 +557,69 @@ func getString(payload map[string]any, key string) string {
 	return ""
 }
 
+func parseClientContext(payload map[string]any, rootID string) ctxbuilder.ClientContext {
+	ctx := ctxbuilder.ClientContext{CurrentRoot: rootID}
+	if payload == nil {
+		return ctx
+	}
+	raw, ok := payload["context"]
+	if !ok || raw == nil {
+		return ctx
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		return ctx
+	}
+	if err := json.Unmarshal(body, &ctx); err != nil {
+		return ctx
+	}
+	if ctx.CurrentRoot == "" {
+		ctx.CurrentRoot = rootID
+	}
+	return ctx
+}
+
+func (h *WSHandler) buildInitialPrompt(
+	sessionItem *session.Session,
+	resolved *ResolvedRoot,
+	message string,
+	clientCtx ctxbuilder.ClientContext,
+) string {
+	if sessionItem == nil || resolved == nil || h.Sessions == nil || h.Sessions.Stores == nil {
+		return ctxbuilder.BuildUserPrompt(message, clientCtx)
+	}
+
+	store, err := h.Sessions.Stores.Get(resolved.ManagedDir)
+	if err != nil {
+		return ctxbuilder.BuildUserPrompt(message, clientCtx)
+	}
+	serverCtx, err := ctxbuilder.BuildServerContext(
+		sessionItem.Type,
+		resolved.Path,
+		resolved.ManagedDir,
+		clientCtx.CurrentPath,
+		clientCtx.CurrentView,
+		store,
+	)
+	if err != nil {
+		return ctxbuilder.BuildUserPrompt(message, clientCtx)
+	}
+
+	systemPrompt := ctxbuilder.BuildSystemPrompt(sessionItem.Type, serverCtx)
+	userPrompt := ctxbuilder.BuildUserPrompt(message, clientCtx)
+	if systemPrompt == "" {
+		return userPrompt
+	}
+	return "系统上下文:\n" + systemPrompt + "\n\n用户输入:\n" + userPrompt
+}
+
+func (h *WSHandler) buildContinuationPrompt(message string, clientCtx ctxbuilder.ClientContext) string {
+	// Ongoing sessions only append fresh UI-only selection context.
+	return ctxbuilder.BuildUserPrompt(message, ctxbuilder.ClientContext{
+		Selection: clientCtx.Selection,
+	})
+}
+
 func (h *WSHandler) handleTaskList(ctx context.Context, conn *websocket.Conn, req WSRequest) {
 	if h.TaskQueue == nil {
 		h.sendWS(conn, WSResponse{
@@ -566,12 +683,12 @@ func (h *WSHandler) handleTaskGet(ctx context.Context, conn *websocket.Conn, req
 
 func taskToMap(t *agent.Task) map[string]any {
 	m := map[string]any{
-		"id":         t.ID,
+		"id":          t.ID,
 		"session_key": t.SessionKey,
-		"type":       t.Type,
-		"status":     string(t.Status),
-		"progress":   t.Progress,
-		"created_at": t.CreatedAt,
+		"type":        t.Type,
+		"status":      string(t.Status),
+		"progress":    t.Progress,
+		"created_at":  t.CreatedAt,
 	}
 	if t.Message != "" {
 		m["message"] = t.Message

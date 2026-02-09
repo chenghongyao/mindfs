@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	configpkg "mindfs/server/internal/config"
 )
 
 // Config holds all agent configurations.
@@ -84,11 +86,11 @@ func LoadConfig(path string) (Config, error) {
 }
 
 func defaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	configDir, err := configpkg.MindFSConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, ".config", "mindfs", "agents.json"), nil
+	return filepath.Join(configDir, "agents.json"), nil
 }
 
 // defaultConfig returns built-in agent definitions.

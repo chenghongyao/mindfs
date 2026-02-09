@@ -5,7 +5,8 @@ import (
 	"errors"
 	"sync"
 
-	"mindfs/server/internal/agent/unified"
+	acp "github.com/coder/acp-go-sdk"
+	acpproc "mindfs/server/internal/agent/acp"
 )
 
 // Pool manages agent processes. Each agent type has one shared process
@@ -13,27 +14,27 @@ import (
 type Pool struct {
 	cfg       Config
 	mu        sync.Mutex
-	processes map[string]*unified.Process // agentName -> Process
+	processes map[string]*acpproc.Process // agentName -> process
 	sessions  map[string]*sessionEntry    // sessionKey -> entry
 }
 
 type sessionEntry struct {
 	agentName  string
 	sessionKey string
-	handle     *unified.SessionHandle
+	session    Session
 }
 
 // NewPool creates a new agent pool.
 func NewPool(cfg Config) *Pool {
 	return &Pool{
 		cfg:       cfg,
-		processes: make(map[string]*unified.Process),
+		processes: make(map[string]*acpproc.Process),
 		sessions:  make(map[string]*sessionEntry),
 	}
 }
 
 // GetOrCreate returns an existing session handle or creates a new one.
-func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath string) (Process, error) {
+func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath string) (Session, error) {
 	if sessionKey == "" {
 		return nil, errors.New("session key required")
 	}
@@ -43,7 +44,7 @@ func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath 
 
 	// Check if session already exists
 	if entry, ok := p.sessions[sessionKey]; ok {
-		return entry.handle, nil
+		return entry.session, nil
 	}
 
 	// Get agent definition
@@ -55,11 +56,10 @@ func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath 
 	// Get or create process for this agent type
 	proc, ok := p.processes[agentName]
 	if !ok {
-		// First process - use provided rootPath as initial cwd
 		args := def.BuildArgs(rootPath)
 		cwd := def.ResolveCwd(rootPath)
 		var err error
-		proc, err = unified.Start(ctx, def.Command, args, cwd, def.Env)
+		proc, err = acpproc.Start(ctx, def.Command, args, cwd, def.Env)
 		if err != nil {
 			return nil, err
 		}
@@ -71,19 +71,21 @@ func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath 
 	}
 
 	// Create a new session within the process (with its own cwd)
-	_, err := proc.NewSession(ctx, sessionKey, rootPath)
-	if err != nil {
+	if err := proc.NewSession(ctx, sessionKey, rootPath); err != nil {
 		return nil, err
 	}
 
-	handle := &unified.SessionHandle{Process: proc, SessionKey: sessionKey}
+	sess := &pooledSession{
+		proc:       proc,
+		sessionKey: sessionKey,
+	}
 	p.sessions[sessionKey] = &sessionEntry{
 		agentName:  agentName,
 		sessionKey: sessionKey,
-		handle:     handle,
+		session:    sess,
 	}
 
-	return handle, nil
+	return sess, nil
 }
 
 // Close closes a session (not the process).
@@ -95,8 +97,8 @@ func (p *Pool) Close(sessionKey string) {
 	}
 	p.mu.Unlock()
 
-	if ok && entry.handle != nil {
-		_ = entry.handle.Close()
+	if ok && entry.session != nil {
+		_ = entry.session.Close()
 	}
 }
 
@@ -108,15 +110,92 @@ func (p *Pool) Config() Config {
 // CloseAll closes all processes.
 func (p *Pool) CloseAll() {
 	p.mu.Lock()
-	procs := make([]*unified.Process, 0, len(p.processes))
+	procs := make([]*acpproc.Process, 0, len(p.processes))
 	for _, proc := range p.processes {
 		procs = append(procs, proc)
 	}
-	p.processes = make(map[string]*unified.Process)
+	p.processes = make(map[string]*acpproc.Process)
 	p.sessions = make(map[string]*sessionEntry)
 	p.mu.Unlock()
 
 	for _, proc := range procs {
 		_ = proc.Close()
 	}
+}
+
+type pooledSession struct {
+	proc       *acpproc.Process
+	sessionKey string
+}
+
+func (s *pooledSession) SendMessage(ctx context.Context, content string) error {
+	return s.proc.SendMessage(ctx, s.sessionKey, content)
+}
+
+func (s *pooledSession) OnUpdate(onUpdate func(Event)) {
+	s.proc.SetOnUpdate(s.sessionKey, func(update acpproc.SessionUpdate) {
+		if onUpdate != nil {
+			onUpdate(convertUnifiedEvent(update))
+		}
+	})
+}
+
+func (s *pooledSession) SessionID() string {
+	return s.proc.SessionID(s.sessionKey)
+}
+
+func (s *pooledSession) Close() error {
+	s.proc.CloseSession(s.sessionKey)
+	return nil
+}
+
+func convertUnifiedEvent(update acpproc.SessionUpdate) Event {
+	ev := Event{
+		Type:      EventType(update.Type),
+		SessionID: update.SessionID,
+	}
+	raw := update.Raw
+	switch update.Type {
+	case acpproc.UpdateTypeMessageChunk:
+		if raw.AgentMessageChunk != nil && raw.AgentMessageChunk.Content.Text != nil {
+			ev.Data = MessageChunk{Content: raw.AgentMessageChunk.Content.Text.Text}
+		}
+	case acpproc.UpdateTypeThoughtChunk:
+		if raw.AgentThoughtChunk != nil && raw.AgentThoughtChunk.Content.Text != nil {
+			ev.Data = ThoughtChunk{Content: raw.AgentThoughtChunk.Content.Text.Text}
+		}
+	case acpproc.UpdateTypeToolCall:
+		if raw.ToolCall != nil {
+			locations := make([]ToolCallLocation, 0, len(raw.ToolCall.Locations))
+			for _, loc := range raw.ToolCall.Locations {
+				locations = append(locations, ToolCallLocation{
+					Path: loc.Path,
+					Line: loc.Line,
+				})
+			}
+			status := "running"
+			if raw.ToolCall.Status != "" {
+				status = string(raw.ToolCall.Status)
+			}
+			ev.Data = ToolCall{
+				CallID:    string(raw.ToolCall.ToolCallId),
+				Name:      raw.ToolCall.Title,
+				Status:    status,
+				Kind:      ToolKind(raw.ToolCall.Kind),
+				Locations: locations,
+			}
+		}
+	case acpproc.UpdateTypeToolUpdate:
+		if raw.ToolCallUpdate != nil {
+			status := "complete"
+			if raw.ToolCallUpdate.Status != nil && *raw.ToolCallUpdate.Status == acp.ToolCallStatusFailed {
+				status = "failed"
+			}
+			ev.Data = ToolCallUpdate{
+				CallID: string(raw.ToolCallUpdate.ToolCallId),
+				Status: status,
+			}
+		}
+	}
+	return ev
 }

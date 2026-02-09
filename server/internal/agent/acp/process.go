@@ -1,17 +1,18 @@
-// Package unified provides a unified ACP-based agent process implementation.
-// All agents (Claude, Gemini, Codex) are accessed through the same ACP protocol.
-package unified
+// Package acp provides ACP-based agent process implementation.
+// All supported agents are accessed through ACP.
+package acp
 
 import (
 	"context"
+	"log"
 	"os/exec"
 	"sync"
 
 	acp "github.com/coder/acp-go-sdk"
 )
 
-// Process manages an agent process using the ACP protocol.
-// This unified implementation works with any ACP-compatible agent:
+// Process manages an agent process using ACP.
+// This implementation works with any ACP-compatible agent:
 // - claude (via claude-code-acp wrapper)
 // - gemini (via --experimental-acp flag)
 // - codex (via codex-acp wrapper)
@@ -20,23 +21,34 @@ type Process struct {
 	conn   *acp.ClientSideConnection
 	client *mindfsClient
 
-	mu       sync.RWMutex
-	sessions map[string]*Session // sessionKey -> Session
+	mu           sync.RWMutex
+	sessions     map[string]*sessionState // sessionKey -> state
+	sessionsByID map[string]*sessionState // ACP session id -> state
 }
 
-// Session represents an ACP session within the process.
-type Session struct {
+type sessionState struct {
 	ID       acp.SessionId
-	Key      string // MindFS session key
 	onUpdate func(SessionUpdate)
-	mu       sync.Mutex
+	mu       sync.RWMutex
+}
+
+func (s *sessionState) setOnUpdate(onUpdate func(SessionUpdate)) {
+	s.mu.Lock()
+	s.onUpdate = onUpdate
+	s.mu.Unlock()
+}
+
+func (s *sessionState) getOnUpdate() func(SessionUpdate) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.onUpdate
 }
 
 // SessionUpdate is the internal session update type.
 type SessionUpdate struct {
 	Type      UpdateType
 	SessionID string
-	Data      any // Type-specific data
+	Raw       acp.SessionUpdate
 }
 
 // UpdateType defines the type of session update.
@@ -50,115 +62,34 @@ const (
 	UpdateTypeMessageDone  UpdateType = "message_done"
 )
 
-// MessageChunk contains text content from agent response.
-type MessageChunk struct {
-	Content string
-}
-
-// ThoughtChunk contains agent's internal reasoning.
-type ThoughtChunk struct {
-	Content string
-}
-
-// ToolKind defines the category of tool being invoked.
-type ToolKind string
-
-const (
-	ToolKindRead       ToolKind = "read"
-	ToolKindEdit       ToolKind = "edit"
-	ToolKindDelete     ToolKind = "delete"
-	ToolKindMove       ToolKind = "move"
-	ToolKindSearch     ToolKind = "search"
-	ToolKindExecute    ToolKind = "execute"
-	ToolKindThink      ToolKind = "think"
-	ToolKindFetch      ToolKind = "fetch"
-	ToolKindSwitchMode ToolKind = "switch_mode"
-	ToolKindOther      ToolKind = "other"
-)
-
-// ToolCallLocation represents a file location affected by a tool call.
-type ToolCallLocation struct {
-	Path string
-	Line *int
-}
-
-// ToolCall contains tool invocation information.
-type ToolCall struct {
-	CallID    string
-	Name      string
-	Status    string
-	Kind      ToolKind
-	Locations []ToolCallLocation
-}
-
-// ToolCallUpdate contains tool execution result.
-type ToolCallUpdate struct {
-	CallID string
-	Status string
-	Result string
-}
-
-// IsWriteOperation returns true if this tool call modifies files.
-func (tc ToolCall) IsWriteOperation() bool {
-	switch tc.Kind {
-	case ToolKindEdit, ToolKindDelete, ToolKindMove:
-		return true
-	default:
-		return false
-	}
-}
-
-// GetAffectedPaths returns all file paths affected by this tool call.
-func (tc ToolCall) GetAffectedPaths() []string {
-	paths := make([]string, 0, len(tc.Locations))
-	for _, loc := range tc.Locations {
-		if loc.Path != "" {
-			paths = append(paths, loc.Path)
-		}
-	}
-	return paths
-}
-
-// SessionHandle wraps a session to implement the Process interface.
-type SessionHandle struct {
-	Process    *Process
-	SessionKey string
-}
-
-// SendMessage sends a message and streams responses via callback.
-func (h *SessionHandle) SendMessage(ctx context.Context, content string, onUpdate func(SessionUpdate)) error {
-	return h.Process.SendMessage(ctx, h.SessionKey, content, onUpdate)
-}
-
-// SessionID returns the current session ID.
-func (h *SessionHandle) SessionID() string {
-	return h.Process.SessionID(h.SessionKey)
-}
-
-// Close removes the session from the process (does not terminate the process).
-func (h *SessionHandle) Close() error {
-	h.Process.CloseSession(h.SessionKey)
-	return nil
-}
-
 // mindfsClient implements acp.Client interface
 type mindfsClient struct {
 	proc *Process
 }
 
 func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNotification) error {
-	c.proc.mu.RLock()
-	session := c.proc.findSessionByID(string(params.SessionId))
-	c.proc.mu.RUnlock()
-
-	if session == nil || session.onUpdate == nil {
+	session := c.proc.getSessionByID(string(params.SessionId))
+	if session == nil {
+		return nil
+	}
+	handler := session.getOnUpdate()
+	if handler == nil {
 		return nil
 	}
 
-	// Convert acp.SessionUpdate to internal format
-	internalUpdate := convertSessionUpdate(string(params.SessionId), params.Update)
+	internalUpdate := wrapSessionUpdate(string(params.SessionId), params.Update)
 	if internalUpdate.Type != "" {
-		session.onUpdate(internalUpdate)
+		switch internalUpdate.Type {
+		case UpdateTypeMessageChunk:
+			content := ""
+			if params.Update.AgentMessageChunk != nil && params.Update.AgentMessageChunk.Content.Text != nil {
+				content = params.Update.AgentMessageChunk.Content.Text.Text
+			}
+			log.Printf("[agent/acp] session.update session_id=%s type=%s content=%q", internalUpdate.SessionID, internalUpdate.Type, content)
+		default:
+			log.Printf("[agent/acp] session.update session_id=%s type=%s", internalUpdate.SessionID, internalUpdate.Type)
+		}
+		handler(internalUpdate)
 	}
 	return nil
 }
@@ -251,8 +182,9 @@ func Start(ctx context.Context, command string, args []string, cwd string, env m
 	}
 
 	proc := &Process{
-		cmd:      cmd,
-		sessions: make(map[string]*Session),
+		cmd:          cmd,
+		sessions:     make(map[string]*sessionState),
+		sessionsByID: make(map[string]*sessionState),
 	}
 	proc.client = &mindfsClient{proc: proc}
 
@@ -279,50 +211,48 @@ func (p *Process) Initialize(ctx context.Context) error {
 }
 
 // NewSession creates a new ACP session for the given MindFS session key.
-func (p *Process) NewSession(ctx context.Context, sessionKey, cwd string) (*Session, error) {
+func (p *Process) NewSession(ctx context.Context, sessionKey, cwd string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Check if session already exists
-	if sess, ok := p.sessions[sessionKey]; ok {
-		return sess, nil
-	}
-
-	resp, err := p.conn.NewSession(ctx, acp.NewSessionRequest{
-		Cwd: cwd,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	sess := &Session{
-		ID:  resp.SessionId,
-		Key: sessionKey,
-	}
-	p.sessions[sessionKey] = sess
-	return sess, nil
-}
-
-// GetSession returns an existing session by MindFS session key.
-func (p *Process) GetSession(sessionKey string) *Session {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.sessions[sessionKey]
-}
-
-// SendMessage sends a prompt to a specific session.
-func (p *Process) SendMessage(ctx context.Context, sessionKey, content string, onUpdate func(SessionUpdate)) error {
-	p.mu.RLock()
-	sess := p.sessions[sessionKey]
-	p.mu.RUnlock()
-
-	if sess == nil {
+	if _, ok := p.sessions[sessionKey]; ok {
 		return nil
 	}
 
-	sess.mu.Lock()
-	sess.onUpdate = onUpdate
-	sess.mu.Unlock()
+	resp, err := p.conn.NewSession(ctx, acp.NewSessionRequest{
+		Cwd:        cwd,
+		McpServers: []acp.McpServer{},
+	})
+	if err != nil {
+		return err
+	}
+
+	sess := &sessionState{
+		ID: resp.SessionId,
+	}
+	p.sessions[sessionKey] = sess
+	p.sessionsByID[string(resp.SessionId)] = sess
+	return nil
+}
+
+// SetOnUpdate registers a callback for a specific session.
+func (p *Process) SetOnUpdate(sessionKey string, onUpdate func(SessionUpdate)) {
+	sess := p.getSessionByKey(sessionKey)
+	if sess != nil {
+		sess.setOnUpdate(onUpdate)
+	}
+}
+
+// SendMessage sends a prompt to a specific session.
+func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) error {
+	sess := p.getSessionByKey(sessionKey)
+
+	if sess == nil {
+		log.Printf("[agent/acp] send.skip session_key=%s reason=session_not_found", sessionKey)
+		return nil
+	}
+	log.Printf("[agent/acp] send.begin session_key=%s session_id=%s prompt_chars=%d content=%q", sessionKey, sess.ID, len(content), content)
 
 	_, err := p.conn.Prompt(ctx, acp.PromptRequest{
 		SessionId: sess.ID,
@@ -330,22 +260,30 @@ func (p *Process) SendMessage(ctx context.Context, sessionKey, content string, o
 			acp.TextBlock(content),
 		},
 	})
+	if err != nil {
+		log.Printf("[agent/acp] send.error session_key=%s session_id=%s err=%v", sessionKey, sess.ID, err)
+		return err
+	}
 
 	// Signal completion
-	if onUpdate != nil {
+	if onUpdate := sess.getOnUpdate(); onUpdate != nil {
 		onUpdate(SessionUpdate{
 			Type:      UpdateTypeMessageDone,
 			SessionID: string(sess.ID),
 		})
 	}
+	log.Printf("[agent/acp] send.done session_key=%s session_id=%s", sessionKey, sess.ID)
 
-	return err
+	return nil
 }
 
 // CloseSession removes a session from the process.
 func (p *Process) CloseSession(sessionKey string) {
 	p.mu.Lock()
-	delete(p.sessions, sessionKey)
+	if sess, ok := p.sessions[sessionKey]; ok {
+		delete(p.sessionsByID, string(sess.ID))
+		delete(p.sessions, sessionKey)
+	}
 	p.mu.Unlock()
 }
 
@@ -361,74 +299,39 @@ func (p *Process) Close() error {
 
 // SessionID returns the ACP session ID for a MindFS session key.
 func (p *Process) SessionID(sessionKey string) string {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if sess, ok := p.sessions[sessionKey]; ok {
+	if sess := p.getSessionByKey(sessionKey); sess != nil {
 		return string(sess.ID)
 	}
 	return ""
 }
 
-func (p *Process) findSessionByID(sessionID string) *Session {
-	for _, sess := range p.sessions {
-		if string(sess.ID) == sessionID {
-			return sess
-		}
-	}
-	return nil
+func (p *Process) getSessionByKey(sessionKey string) *sessionState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.sessions[sessionKey]
+}
+
+func (p *Process) getSessionByID(sessionID string) *sessionState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.sessionsByID[sessionID]
 }
 
 // convertSessionUpdate converts acp-go SessionUpdate to internal format
-func convertSessionUpdate(sessionID string, update acp.SessionUpdate) SessionUpdate {
-	result := SessionUpdate{SessionID: sessionID}
-
-	if update.AgentMessageChunk != nil {
-		text := ""
-		if update.AgentMessageChunk.Content.Text != nil {
-			text = update.AgentMessageChunk.Content.Text.Text
-		}
-		result.Type = UpdateTypeMessageChunk
-		result.Data = MessageChunk{Content: text}
-	} else if update.AgentThoughtChunk != nil {
-		text := ""
-		if update.AgentThoughtChunk.Content.Text != nil {
-			text = update.AgentThoughtChunk.Content.Text.Text
-		}
-		result.Type = UpdateTypeThoughtChunk
-		result.Data = ThoughtChunk{Content: text}
-	} else if update.ToolCall != nil {
-		status := "running"
-		if update.ToolCall.Status != "" {
-			status = string(update.ToolCall.Status)
-		}
-		// Convert locations
-		locations := make([]ToolCallLocation, 0, len(update.ToolCall.Locations))
-		for _, loc := range update.ToolCall.Locations {
-			tcLoc := ToolCallLocation{Path: loc.Path}
-			if loc.Line != nil {
-				tcLoc.Line = loc.Line
-			}
-			locations = append(locations, tcLoc)
-		}
-		result.Type = UpdateTypeToolCall
-		result.Data = ToolCall{
-			CallID:    string(update.ToolCall.ToolCallId),
-			Name:      update.ToolCall.Title,
-			Status:    status,
-			Kind:      ToolKind(update.ToolCall.Kind),
-			Locations: locations,
-		}
-	} else if update.ToolCallUpdate != nil {
-		status := "complete"
-		if update.ToolCallUpdate.Status != nil && *update.ToolCallUpdate.Status == acp.ToolCallStatusFailed {
-			status = "failed"
-		}
-		result.Type = UpdateTypeToolUpdate
-		result.Data = ToolCallUpdate{
-			CallID: string(update.ToolCallUpdate.ToolCallId),
-			Status: status,
-		}
+func wrapSessionUpdate(sessionID string, update acp.SessionUpdate) SessionUpdate {
+	result := SessionUpdate{
+		SessionID: sessionID,
+		Raw:       update,
 	}
-
+	switch {
+	case update.AgentMessageChunk != nil:
+		result.Type = UpdateTypeMessageChunk
+	case update.AgentThoughtChunk != nil:
+		result.Type = UpdateTypeThoughtChunk
+	case update.ToolCall != nil:
+		result.Type = UpdateTypeToolCall
+	case update.ToolCallUpdate != nil:
+		result.Type = UpdateTypeToolUpdate
+	}
 	return result
 }

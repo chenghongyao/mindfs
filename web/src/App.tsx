@@ -13,6 +13,7 @@ import { ActionClient } from "./services/actions";
 import { applyViewUpdate } from "./services/viewUpdates";
 import { mergeViewIntoShell } from "./renderer/merge";
 import { sessionService, type Session } from "./services/session";
+import { buildClientContext } from "./services/context";
 
 type ManagedDir = {
   id: string;
@@ -153,9 +154,13 @@ export function App() {
         if (!session) return;
         setCurrentSession(session);
       }
-      await sessionService.sendMessage(currentRootId, session.key, message);
+      const context = buildClientContext({
+        currentRoot: currentRootId,
+        currentPath: file?.path ?? selectedDir ?? undefined,
+      });
+      await sessionService.sendMessage(currentRootId, session.key, message, context);
     },
-    [currentRootId, currentSession]
+    [currentRootId, currentSession, file?.path, selectedDir]
   );
 
   const handleToggleRight = useCallback(() => {

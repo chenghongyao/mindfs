@@ -1,0 +1,13 @@
+{
+  "agents": {
+    "gemini": {
+      "command": "gemini",
+      "args": ["--experimental-acp"],
+      "transport": {
+        "initTimeout": 120000,
+        "idleTimeout": 500,
+        "filterPatterns": ["^\\[DEBUG\\]", "^\\[INFO\\]"]
+      }
+    }
+  }
+}

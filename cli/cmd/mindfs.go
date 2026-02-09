@@ -36,6 +36,7 @@ func main() {
 	}
 
 	if serverRunning(*addr) {
+		fmt.Fprintf(os.Stdout, "server already running on %s, reusing existing process\n", *addr)
 		if err := addManagedDir(*addr, root); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(1)

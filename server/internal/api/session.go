@@ -149,6 +149,25 @@ func (s *SessionService) CloseSession(ctx context.Context, rootID, sessionKey st
 	return closed, nil
 }
 
+// ResumeSession resumes a closed/idle session.
+func (s *SessionService) ResumeSession(ctx context.Context, rootID, sessionKey string) (*session.Session, error) {
+	manager, _, err := s.GetManager(rootID)
+	if err != nil {
+		return nil, err
+	}
+	resumed, err := manager.Resume(ctx, sessionKey)
+	if err != nil {
+		return nil, err
+	}
+
+	// 审计日志
+	if logger := s.GetAuditLogger(rootID); logger != nil {
+		_ = logger.LogSession(audit.ActionSessionResume, audit.ActorUser, sessionKey, resumed.Agent, nil)
+	}
+
+	return resumed, nil
+}
+
 // ============ HTTP Handlers ============
 
 func (h *HTTPHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
