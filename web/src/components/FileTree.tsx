@@ -169,7 +169,7 @@ export function FileTree({
                 paddingLeft: 8 + depth * 16,
                 display: "flex",
                 alignItems: "center",
-                gap: "8px",
+                gap: "4px",
                 width: "100%",
                 textAlign: "left",
                 color: isSelected ? "var(--accent-color)" : "var(--text-primary)",
@@ -182,17 +182,15 @@ export function FileTree({
               onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = "rgba(0,0,0,0.03)"; }}
               onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = "transparent"; }}
             >
-              <div style={{ width: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                 {entry.is_dir ? <ChevronRight isOpen={isOpen} /> : null}
+              <div style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                 {entry.is_dir ? <ChevronRight isOpen={isOpen} /> : (
+                   <div style={{ fontSize: '10px', fontWeight: 700, opacity: 0.8 }}>
+                     {getFileIcon(entry.name)}
+                   </div>
+                 )}
               </div>
-              
-              {!entry.is_dir && (
-                <div style={{ fontSize: '10px', fontWeight: 700, width: 24, textAlign: 'center', opacity: 0.8 }}>
-                  {getFileIcon(entry.name)}
-                </div>
-              )}
 
-              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, marginLeft: "4px" }}>
                 {entry.name}
               </span>
 

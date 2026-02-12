@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log"
 
 	"mindfs/server/internal/agent"
 	ctxbuilder "mindfs/server/internal/context"
@@ -205,9 +206,15 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	if agentPool == nil {
 		return nil
 	}
-	watcher, _ := s.Registry.GetFileWatcher(in.RootID, manager)
+	watcher, watcherErr := s.Registry.GetFileWatcher(in.RootID, manager)
+	if watcherErr != nil {
+		log.Printf("[watcher] root=%s session=%s get_failed err=%v", in.RootID, current.Key, watcherErr)
+	}
 	if watcher != nil {
 		watcher.RegisterSession(current.Key)
+		watcher.MarkSessionActive(current.Key)
+	} else {
+		log.Printf("[watcher] root=%s session=%s unavailable", in.RootID, current.Key)
 	}
 	root := manager.Root()
 	rootAbs, _ := root.RootDir()

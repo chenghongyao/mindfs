@@ -27,6 +27,35 @@ type SessionViewerProps = {
   onFileClick?: (path: string) => void;
 };
 
+// 时间格式化工具
+const formatTime = (isoString?: string) => {
+  if (!isoString) return "";
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    
+    const isToday = date.toDateString() === now.toDateString();
+    const isThisYear = date.getFullYear() === now.getFullYear();
+    
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    if (isToday) {
+      return timeStr;
+    }
+    
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    
+    if (isThisYear) {
+      return `${month}-${day} ${timeStr}`;
+    }
+    
+    return `${date.getFullYear()}-${month}-${day} ${timeStr}`;
+  } catch {
+    return "";
+  }
+};
+
 export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
   const [showAllFiles, setShowAllFiles] = useState(false);
 
@@ -67,56 +96,64 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
         </div>
       </div>
 
-      {/* Content - 确保铺满 */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%" }}>
+      {/* Content */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "32px", width: "100%" }}>
         {exchanges.length > 0 ? (
           exchanges.map((item, idx) => {
             const isUser = (item.role || "").toLowerCase() === "user";
+            const time = formatTime(item.timestamp);
             return (
               <div
                 key={idx}
                 style={{
                   alignSelf: isUser ? "flex-end" : "flex-start",
-                  width: isUser ? "auto" : "100%", // Agent 或 结果 必须铺满
+                  width: isUser ? "auto" : "100%",
                   maxWidth: isUser ? "80%" : "100%",
+                  position: 'relative'
                 }}
               >
                 {isUser ? (
-                  <div
-                    style={{
-                      padding: "10px 16px",
-                      borderRadius: "18px 18px 4px 18px",
-                      background: "var(--accent-color)",
-                      color: "#fff",
-                      fontSize: "14px",
-                      lineHeight: "1.5",
-                      boxShadow: "0 4px 12px rgba(59,130,246,0.15)",
-                    }}
-                  >
-                    {item.content || ""}
-                  </div>
-                ) : (
-                  <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm]}
-                      components={{
-                        p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0", width: "100%" }} {...props} />,
-                        pre: ({node, ...props}) => (
-                          <pre style={{ 
-                            background: "rgba(0,0,0,0.04)", 
-                            padding: "16px", 
-                            borderRadius: "8px", 
-                            overflow: "auto",
-                            fontSize: "13px",
-                            margin: "1.5em 0",
-                            width: "100%",
-                            boxSizing: "border-box"
-                          }} {...props} />
-                        )
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                    <div
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: "18px 18px 4px 18px",
+                        background: "var(--accent-color)",
+                        color: "#fff",
+                        fontSize: "14px",
+                        lineHeight: "1.5",
+                        boxShadow: "0 4px 12px rgba(59,130,246,0.15)",
                       }}
                     >
                       {item.content || ""}
-                    </ReactMarkdown>
+                    </div>
+                    <span style={{ fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginRight: '4px' }}>{time}</span>
+                  </div>
+                ) : (
+                  <div style={{ width: "100%", position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                    <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
+                      <ReactMarkdown 
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0", width: "100%" }} {...props} />,
+                          pre: ({node, ...props}) => (
+                            <pre style={{ 
+                              background: "rgba(0,0,0,0.04)", 
+                              padding: "16px", 
+                              borderRadius: "8px", 
+                              overflow: "auto",
+                              fontSize: "13px",
+                              margin: "1.5em 0",
+                              width: "100%",
+                              boxSizing: "border-box"
+                            }} {...props} />
+                          )
+                        }}
+                      >
+                        {item.content || ""}
+                      </ReactMarkdown>
+                    </div>
+                    {time && <span style={{ alignSelf: 'flex-start', fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginTop: '-10px', marginBottom: '4px' }}>{time}</span>}
                   </div>
                 )}
               </div>
@@ -173,7 +210,7 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
               </button>
             )}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "12px" }}>
             {displayFiles.map((file, i) => (
               <div
                 key={i}

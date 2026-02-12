@@ -290,6 +290,12 @@ export function App() {
         setStatus(`Opening ${path}`);
         try {
           const root = rootParam ?? currentRootId ?? undefined;
+          
+          // 如果点击的文件属于不同的 root，同步切换当前活跃 root
+          if (rootParam && rootParam !== currentRootId) {
+            setCurrentRootId(rootParam);
+          }
+
           const query = new URLSearchParams({ path });
           if (root) query.set("root", root);
           const res = await fetch(`/api/file?${query.toString()}`);

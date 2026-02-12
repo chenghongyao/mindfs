@@ -24,6 +24,35 @@ type ComponentProps = {
   onAction?: (action: { name: string; params?: Record<string, unknown> }) => void;
 };
 
+// 时间格式化工具
+const formatTime = (isoString?: string) => {
+  if (!isoString) return "";
+  try {
+    const date = new Date(isoString);
+    const now = new Date();
+    
+    const isToday = date.toDateString() === now.toDateString();
+    const isThisYear = date.getFullYear() === now.getFullYear();
+    
+    const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+    
+    if (isToday) {
+      return timeStr;
+    }
+    
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    
+    if (isThisYear) {
+      return `${month}-${day} ${timeStr}`;
+    }
+    
+    return `${date.getFullYear()}-${month}-${day} ${timeStr}`;
+  } catch {
+    return "";
+  }
+};
+
 const Shell: React.FC<ComponentProps> = ({ children }) => {
   const nodes = React.Children.toArray(children);
   return (
@@ -243,7 +272,6 @@ const AgentMessageListNode: React.FC<ComponentProps> = ({ element }) => {
   }, [exchanges.length, clearChunks]);
 
   React.useEffect(() => {
-    // 改为 behavior: "auto" 实现瞬间定位
     messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
   }, [exchanges, chunks, isStreaming]);
 
@@ -260,6 +288,7 @@ const AgentMessageListNode: React.FC<ComponentProps> = ({ element }) => {
     >
       {exchanges.map((ex, i) => {
         const isUser = ex.role === "user";
+        const time = formatTime(ex.timestamp);
         return (
           <div
             key={i}
@@ -267,49 +296,56 @@ const AgentMessageListNode: React.FC<ComponentProps> = ({ element }) => {
               alignSelf: isUser ? "flex-end" : "flex-start",
               width: isUser ? "auto" : "100%",
               maxWidth: isUser ? "85%" : "100%",
+              position: "relative"
             }}
           >
             {isUser ? (
-              <div
-                style={{
-                  padding: "10px 16px",
-                  borderRadius: "18px 18px 4px 18px",
-                  background: "var(--accent-color)",
-                  color: "#fff",
-                  fontSize: "14px",
-                  lineHeight: "1.5",
-                  boxShadow: "0 4px 12px rgba(59,130,246,0.2)",
-                }}
-              >
-                {ex.content}
-              </div>
-            ) : (
-              <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7" }}>
-                <ReactMarkdown 
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0" }} {...props} />,
-                    pre: ({node, ...props}) => (
-                      <pre style={{ 
-                        background: "rgba(0,0,0,0.04)", 
-                        padding: "16px", 
-                        borderRadius: "8px", 
-                        overflow: "auto",
-                        fontSize: "13px",
-                        margin: "1em 0"
-                      }} {...props} />
-                    ),
-                    code: ({node, ...props}) => (
-                      <code style={{ 
-                        background: "rgba(0,0,0,0.04)", 
-                        padding: "2px 4px", 
-                        borderRadius: "4px" 
-                      }} {...props} />
-                    )
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+                <div
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: "18px 18px 4px 18px",
+                    background: "var(--accent-color)",
+                    color: "#fff",
+                    fontSize: "14px",
+                    lineHeight: "1.5",
+                    boxShadow: "0 4px 12px rgba(59,130,246,0.2)",
                   }}
                 >
                   {ex.content}
-                </ReactMarkdown>
+                </div>
+                <span style={{ fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginRight: '4px' }}>{time}</span>
+              </div>
+            ) : (
+              <div style={{ width: "100%", position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0" }} {...props} />,
+                      pre: ({node, ...props}) => (
+                        <pre style={{ 
+                          background: "rgba(0,0,0,0.04)", 
+                          padding: "16px", 
+                          borderRadius: "8px", 
+                          overflow: "auto",
+                          fontSize: "13px",
+                          margin: "1em 0"
+                        }} {...props} />
+                      ),
+                      code: ({node, ...props}) => (
+                        <code style={{ 
+                          background: "rgba(0,0,0,0.04)", 
+                          padding: "2px 4px", 
+                          borderRadius: "4px" 
+                        }} {...props} />
+                      )
+                    }}
+                  >
+                    {ex.content}
+                  </ReactMarkdown>
+                </div>
+                {time && <span style={{ alignSelf: 'flex-start', fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginTop: '-10px', marginBottom: '4px' }}>{time}</span>}
               </div>
             )}
           </div>

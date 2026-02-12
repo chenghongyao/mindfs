@@ -3,6 +3,7 @@ package fs
 import (
 	"context"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,8 @@ type SharedFileWatcher struct {
 
 	done chan struct{}
 }
+
+const activeSessionFallbackWindow = 5 * time.Minute
 
 type SessionFileRecorder interface {
 	RecordOutputFile(ctx context.Context, key, path string) error
@@ -160,27 +163,32 @@ func (sw *SharedFileWatcher) run() {
 			if !ok {
 				return
 			}
-			if event.Op&(fsnotify.Create|fsnotify.Write) == 0 {
+			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 {
 				continue
 			}
 			if sw.shouldIgnore(event.Name) {
 				continue
 			}
+			log.Printf("[watcher] event op=%s path=%s", event.Op.String(), event.Name)
 			info, err := os.Stat(event.Name)
 			if err != nil {
+				log.Printf("[watcher] stat_failed op=%s path=%s err=%v", event.Op.String(), event.Name, err)
 				continue
 			}
 			if info.IsDir() {
 				if rel, err := sw.root.NormalizePath(event.Name); err == nil {
 					_ = sw.addWatchRecursive(rel)
+					log.Printf("[watcher] dir_event op=%s rel=%s action=watch_recursive", event.Op.String(), rel)
 				}
 				continue
 			}
 			rel, err := sw.root.NormalizePath(event.Name)
 			if err != nil {
+				log.Printf("[watcher] normalize_failed op=%s path=%s err=%v", event.Op.String(), event.Name, err)
 				continue
 			}
 			sessionKey := sw.resolveSessionKey(rel)
+			log.Printf("[watcher] file_event op=%s rel=%s session=%s", event.Op.String(), rel, sessionKey)
 			if sessionKey == "" {
 				continue
 			}
@@ -202,7 +210,7 @@ func (sw *SharedFileWatcher) resolveSessionKey(relPath string) string {
 		delete(sw.pendingWrites, relPath)
 		return sessionKey
 	}
-	if sw.lastActiveKey != "" && time.Since(sw.lastActiveTime) < 30*time.Second {
+	if sw.lastActiveKey != "" && time.Since(sw.lastActiveTime) < activeSessionFallbackWindow {
 		return sw.lastActiveKey
 	}
 	return ""

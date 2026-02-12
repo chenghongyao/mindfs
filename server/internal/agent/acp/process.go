@@ -4,6 +4,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os/exec"
 	"sync"
@@ -68,6 +69,8 @@ type mindfsClient struct {
 }
 
 func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNotification) error {
+	v, _ := json.Marshal(params)
+	log.Printf("[agent/acp] session.update session_id=%s params=%s", params.SessionId, v)
 	session := c.proc.getSessionByID(string(params.SessionId))
 	if session == nil {
 		return nil
@@ -95,6 +98,8 @@ func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNoti
 }
 
 func (c *mindfsClient) RequestPermission(ctx context.Context, params acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	v, _ := json.Marshal(params)
+	log.Printf("[agent/acp] request.permission session_id=%s params=%s", params.SessionId, v)
 	// TODO: Forward to frontend for user approval
 	// For now, auto-approve with first allow option
 	for _, opt := range params.Options {
