@@ -24,7 +24,8 @@ export async function fetchViewRoutes(rootId: string, path?: string): Promise<Vi
   }
 
   const data = await response.json();
-  return (data.routes || []).map((r: ViewRouteInfo) => ({
+  const routes = Array.isArray(data) ? data : [];
+  return routes.map((r: ViewRouteInfo) => ({
     route_id: r.route_id,
     route_name: r.route_name,
     priority: r.priority,

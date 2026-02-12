@@ -29,12 +29,17 @@ export type FilePayload = {
 };
 
 export type SessionSummary = {
-  session_key: string;
+  key?: string;
+  session_key?: string;
+  name?: string;
+  type?: "chat" | "view" | "skill";
+  status?: "active" | "idle" | "closed";
   agent?: string;
   scope?: string;
   purpose?: string;
-  summary?: string;
+  summary?: string | { title?: string; description?: string };
   closed_at?: string;
+  related_files?: Array<{ path: string; name?: string }>;
 };
 
 export type CurrentSession = {
@@ -64,7 +69,9 @@ export function buildDefaultTree(
   rightCollapsed?: boolean,
   onToggleRight?: (() => void) | null,
   onOpenSettings?: (() => void) | null,
-  settingsOpen?: boolean
+  settingsOpen?: boolean,
+  isFloatingOpen?: boolean,
+  onToggleFloating?: (open: boolean) => void
 ): UITree {
   const elements: Record<string, UIElement> = {};
   const rootKey = "root";
@@ -73,8 +80,58 @@ export function buildDefaultTree(
     key: rootKey,
     type: "Shell",
     props: {},
-    children: ["sidebar", "main", "right", "footer"],
+    children: ["sidebar", "main", "right", "footer", "floating-container"],
   };
+
+  elements["floating-container"] = {
+    key: "floating-container",
+    type: "Container",
+    props: {},
+    children: [],
+  };
+
+  if (currentSession) {
+        if (isFloatingOpen) {
+          elements["agent-panel"] = {
+            key: "agent-panel",
+            type: "AgentPanel",
+            props: {
+              onClose: () => onToggleFloating?.(false),
+            },
+            children: ["agent-header", "agent-messages"]
+          };
+    
+          elements["agent-header"] = {
+            key: "agent-header",
+            type: "AgentHeader",
+            props: {
+              session: currentSession,
+              onClose: () => onToggleFloating?.(false),
+            }
+          };
+    
+                elements["agent-messages"] = {
+                  key: "agent-messages",
+                  type: "AgentMessageList",
+                  props: {
+                    session: currentSession,
+                    exchanges: (currentSession as any).exchanges || [],
+                  }
+                };
+                    elements["floating-container"].children = ["agent-panel"];
+        }
+     else {
+      elements["agent-bubble"] = {
+        key: "agent-bubble",
+        type: "AgentBubble",
+        props: {
+          session: currentSession,
+          onClick: () => onToggleFloating?.(true),
+        },
+      };
+      elements["floating-container"].children = ["agent-bubble"];
+    }
+  }
 
   elements.sidebar = {
     key: "sidebar",
@@ -96,14 +153,45 @@ export function buildDefaultTree(
     },
   };
 
+  const isSelectedSessionActive = currentSession && (selectedSession?.key === currentSession.key || selectedSession?.session_key === currentSession.key);
+  const showSessionInMain = selectedSession && !isSelectedSessionActive;
+  
+  // Logic for association view (P1: could be triggered by specific URL or action)
+  const showAssociation = false; // Placeholder for activation logic
+
   elements.main = {
     key: "main",
     type: "Main",
     props: {},
-    children: [selectedSession ? "session-viewer" : file ? "file-viewer" : "default-list"],
+    children: [
+      showAssociation ? "association-view" :
+      showSessionInMain ? "session-viewer" : 
+      file ? "file-viewer" : 
+      "default-list"
+    ],
   };
 
-  if (selectedSession) {
+  if (showAssociation) {
+    // Collect all related files from all sessions for global association view
+    const allFiles = (sessions || []).flatMap(s => 
+      (s.related_files || []).map(f => ({
+        ...f,
+        source_session: s.key || s.session_key,
+        session_name: s.name || s.purpose
+      }))
+    );
+    
+    elements["association-view"] = {
+      key: "association-view",
+      type: "AssociationView",
+      props: {
+        title: "所有关联文件",
+        files: allFiles
+      }
+    };
+  }
+
+  if (showSessionInMain) {
     elements["session-viewer"] = {
       key: "session-viewer",
       type: "SessionViewer",
@@ -141,7 +229,7 @@ export function buildDefaultTree(
     type: "SessionList",
     props: {
       sessions: sessions ?? [],
-      selectedKey: selectedSession?.session_key ?? "",
+      selectedKey: selectedSession?.key ?? selectedSession?.session_key ?? "",
       onSelect: onSelectSession ?? undefined,
     },
   };

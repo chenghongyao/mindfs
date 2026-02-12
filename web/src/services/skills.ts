@@ -20,7 +20,7 @@ export async function fetchSkills(rootId: string): Promise<Skill[]> {
   }
 
   const data = await response.json();
-  return data.skills || [];
+  return Array.isArray(data) ? data : [];
 }
 
 // Execute a skill

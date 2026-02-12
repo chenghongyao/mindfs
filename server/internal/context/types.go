@@ -1,7 +1,5 @@
 package context
 
-import "time"
-
 type ClientContext struct {
 	CurrentRoot string          `json:"current_root"`
 	CurrentPath string          `json:"current_path,omitempty"`
@@ -27,9 +25,8 @@ type ServerContext struct {
 }
 
 type CommonContext struct {
-	RootPath        string         `json:"root_path"`
-	UserDescription string         `json:"user_description,omitempty"`
-	RelatedSessions []SessionBrief `json:"related_sessions,omitempty"`
+	RootPath        string `json:"root_path"`
+	UserDescription string `json:"user_description,omitempty"`
 }
 
 type ViewContext struct {
@@ -44,24 +41,15 @@ type SkillContext struct {
 	DirectorySkills []SkillBrief `json:"directory_skills,omitempty"`
 }
 
-type SessionBrief struct {
-	Key          string    `json:"key"`
-	Type         string    `json:"type"`
-	Name         string    `json:"name"`
-	Status       string    `json:"status"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	RelatedFiles []string  `json:"related_files"`
-}
-
 type ComponentCatalog struct {
 	Version    string                   `json:"version"`
 	Components map[string]ComponentSpec `json:"components"`
 }
 
 type ComponentSpec struct {
-	Description string                 `json:"description"`
-	Props       map[string]any         `json:"props"`
-	Actions     []string               `json:"actions,omitempty"`
+	Description string         `json:"description"`
+	Props       map[string]any `json:"props"`
+	Actions     []string       `json:"actions,omitempty"`
 }
 
 type RegistrySchema map[string]any

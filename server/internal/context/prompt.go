@@ -5,15 +5,10 @@ import (
 	"strings"
 )
 
-func BuildSystemPrompt(mode string, ctx ServerContext) string {
+func BuildServerPrompt(mode string, ctx ServerContext) string {
 	lines := []string{}
-	lines = append(lines, "工作目录: "+ctx.Common.RootPath)
 	if ctx.Common.UserDescription != "" {
-		lines = append(lines, "目录描述: "+ctx.Common.UserDescription)
-	}
-	if len(ctx.Common.RelatedSessions) > 0 {
-		payload, _ := json.Marshal(ctx.Common.RelatedSessions)
-		lines = append(lines, "关联 Session: "+string(payload))
+		lines = append(lines, "当前项目描述: "+ctx.Common.UserDescription)
 	}
 	if mode == "view" && ctx.View != nil {
 		catalog, _ := json.Marshal(ctx.View.Catalog)
@@ -27,16 +22,19 @@ func BuildSystemPrompt(mode string, ctx ServerContext) string {
 		payload, _ := json.Marshal(ctx.Skill.DirectorySkills)
 		lines = append(lines, "目录技能: "+string(payload))
 	}
-	return strings.Join(lines, "\n")
+	if len(lines) == 0 {
+		return ""
+	}
+	return "[ASSIST_CONTEXT]\n" + strings.Join(lines, "\n")
 }
 
 func BuildUserPrompt(message string, clientCtx ClientContext) string {
 	lines := []string{strings.TrimSpace(message)}
 	if clientCtx.CurrentPath != "" {
-		lines = append(lines, "当前路径: "+clientCtx.CurrentPath)
+		lines = append(lines, "选中文件: "+clientCtx.CurrentPath)
 	}
 	if clientCtx.Selection != nil {
 		lines = append(lines, "选中内容: "+clientCtx.Selection.Text)
 	}
-	return strings.Join(lines, "\n")
+	return "[USER_INPUT]\n" + strings.Join(lines, "\n")
 }

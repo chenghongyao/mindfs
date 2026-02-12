@@ -11,7 +11,7 @@
 1. **路径优先，内容按需**：只传文件路径，让 Agent 自己读取内容（Agent 有文件访问能力）
 2. **选中内容例外**：用户高亮选中的内容需要直接传，因为这是 UI 状态，Agent 无法获取
 3. **语义优先**：传 userDescription（用户对目录的描述），不传目录结构（Agent 可自己 ls）
-4. **关联优先**：recent session 只取与当前目录/文件关联的 Session
+4. **Session 独立**：每个 Session 是独立任务，不传递其他 Session 的上下文
 5. **Agent 能力自知**：Agent 内置能力不用传，只传目录自定义 skill
 
 ---
@@ -54,7 +54,6 @@ interface ServerContext {
   common: {
     root_path: string;               // 管理目录绝对路径
     user_description?: string;       // 用户对目录的描述 (来自 config.json)
-    related_sessions?: SessionBrief[]; // 关联的最近 Session (同目录/同文件)
   };
 
   // 视图模式专用
@@ -87,7 +86,6 @@ interface ServerContext {
 | 选中内容 | ✓ | UI 状态，Agent 无法获取 |
 | 目录结构 | ✗ | Agent 可自己 ls |
 | 文件内容 | ✗ | Agent 可自己 cat |
-| 关联 Session | ✓ | 提供历史上下文参考 |
 
 ### 视图模式 (view)
 
@@ -133,7 +131,6 @@ interface ServerContext {
 │                                                                         │
 │  通用:                                                                   │
 │    - 读取 userDescription                                               │
-│    - 查找关联 Session (同目录/同文件)                                    │
 │                                                                         │
 │  if mode == "view":                                                     │
 │    - 加载 catalog + registry schema                                     │
@@ -184,68 +181,24 @@ interface ServerContext {
 
 ---
 
-## 关联 Session 查找规则
-
-**优先级**: 文件关联 > 同目录文件关联 > 同管理目录
-
-```typescript
-function findRelatedSessions(
-  rootId: string,
-  currentPath?: string,
-  limit: number = 3
-): SessionBrief[] {
-  const allSessions = loadSessions(rootId);
-
-  // 按优先级分组
-  const fileRelated: SessionBrief[] = [];      // 优先级 1: 涉及当前文件
-  const dirRelated: SessionBrief[] = [];       // 优先级 2: 涉及同目录文件
-  const rootRelated: SessionBrief[] = [];      // 优先级 3: 同管理目录
-
-  for (const s of allSessions) {
-    if (currentPath && s.related_files.includes(currentPath)) {
-      fileRelated.push(s);
-    } else if (currentPath && s.related_files.some(f => dirname(f) === dirname(currentPath))) {
-      dirRelated.push(s);
-    } else {
-      rootRelated.push(s);
-    }
-  }
-
-  // 按优先级合并，每组内按时间排序
-  const sortByTime = (a: SessionBrief, b: SessionBrief) =>
-    new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-
-  return [
-    ...fileRelated.sort(sortByTime),
-    ...dirRelated.sort(sortByTime),
-    ...rootRelated.sort(sortByTime)
-  ].slice(0, limit);
-}
-```
-
----
-
 ## 数据结构定义
 
 ```typescript
-// Session 摘要 (用于关联 Session 列表)
-interface SessionBrief {
-  key: string;
-  type: "chat" | "view" | "skill";
-  name: string;
-  status: "active" | "idle" | "closed";
-  updated_at: string;
-  related_files: string[];           // 关联文件路径列表
-}
-
 // 组件 Catalog (视图模式)
 interface ComponentCatalog {
   version: string;
   components: {
     [name: string]: {
       description: string;
-      props: Record<string, PropDef>;
-      actions?: string[];            // 可触发的 action
+      props: z.ZodType;
+      events?: string[];
+      slots?: string[];
+    };
+  };
+  actions: {
+    [name: string]: {
+      params: z.ZodType;
+      description: string;
     };
   };
 }

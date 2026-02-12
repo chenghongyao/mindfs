@@ -41,11 +41,11 @@ func TestHandleViewRoutesIsReachable(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	var body map[string]any
+	var body []any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if _, ok := body["routes"]; !ok {
-		t.Fatalf("expected response to include routes field, got: %v", body)
+	if body == nil {
+		t.Fatalf("expected array response, got nil")
 	}
 }

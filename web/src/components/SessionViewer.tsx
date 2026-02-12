@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type RelatedFile = {
   path: string;
@@ -7,13 +9,17 @@ type RelatedFile = {
 };
 
 type SessionItem = {
-  session_key: string;
+  key?: string;
+  session_key?: string;
+  type?: string;
+  name?: string;
   agent?: string;
   scope?: string;
   purpose?: string;
-  summary?: string;
+  summary?: string | { title?: string; description?: string };
+  exchanges?: Array<{ role?: string; content?: string; timestamp?: string }>;
   closed_at?: string;
-  related_files?: RelatedFile[];
+  related_files?: Array<RelatedFile | { path: string; relation?: string; created_by_session?: boolean }>;
 };
 
 type SessionViewerProps = {
@@ -26,45 +32,124 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
 
   if (!session) {
     return (
-      <div style={{ padding: "24px", color: "var(--text-secondary)" }}>
+      <div style={{ padding: "40px", textAlign: "center", color: "var(--text-secondary)" }}>
         选择一个会话查看内容
       </div>
     );
   }
 
-  const relatedFiles = session.related_files || [];
+  const relatedFiles = (session.related_files || []).map((f: any) => {
+    const path = typeof f?.path === "string" ? f.path : "";
+    const name = typeof f?.name === "string" ? f.name : path.split("/").pop() || path;
+    return { path, name };
+  });
   const displayFiles = showAllFiles ? relatedFiles : relatedFiles.slice(0, 5);
   const hasMoreFiles = relatedFiles.length > 5;
+  const exchanges = Array.isArray(session.exchanges) ? session.exchanges : [];
+  
+  const summaryText =
+    typeof session.summary === "string"
+      ? session.summary
+      : session.summary?.description || "";
+  
+  const scope = session.type ?? session.scope ?? "chat";
+  const displayName = session.name ?? session.purpose ?? session.key ?? session.session_key ?? "Session";
 
   return (
-    <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-      <div style={{ fontSize: "14px", color: "var(--text-secondary)" }}>
-        {session.agent ?? "agent"} · {session.scope ?? "scope"} · {session.purpose ?? "purpose"}
+    <div style={{ padding: "24px 32px", maxWidth: "1000px", width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: "24px", boxSizing: "border-box" }}>
+      {/* 打薄后的 Header */}
+      <div style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "12px", display: "flex", alignItems: "baseline", gap: "12px" }}>
+        <h1 style={{ fontSize: "18px", fontWeight: 600, margin: 0 }}>{displayName}</h1>
+        <div style={{ fontSize: "12px", color: "var(--text-secondary)", display: "flex", gap: "8px" }}>
+          <strong>{session.agent ?? "agent"}</strong>
+          <span>•</span>
+          <span>{scope}</span>
+        </div>
       </div>
-      <div style={{ fontSize: "20px", fontWeight: 700, color: "var(--text-primary)" }}>
-        会话总结
-      </div>
-      <div
-        style={{
-          background: "rgba(255,255,255,0.9)",
-          borderRadius: "12px",
-          padding: "16px",
-          border: "1px solid var(--border-color)",
-          lineHeight: 1.6,
-        }}
-      >
-        {session.summary ?? "(no summary)"}
+
+      {/* Content - 确保铺满 */}
+      <div style={{ display: "flex", flexDirection: "column", gap: "24px", width: "100%" }}>
+        {exchanges.length > 0 ? (
+          exchanges.map((item, idx) => {
+            const isUser = (item.role || "").toLowerCase() === "user";
+            return (
+              <div
+                key={idx}
+                style={{
+                  alignSelf: isUser ? "flex-end" : "flex-start",
+                  width: isUser ? "auto" : "100%", // Agent 或 结果 必须铺满
+                  maxWidth: isUser ? "80%" : "100%",
+                }}
+              >
+                {isUser ? (
+                  <div
+                    style={{
+                      padding: "10px 16px",
+                      borderRadius: "18px 18px 4px 18px",
+                      background: "var(--accent-color)",
+                      color: "#fff",
+                      fontSize: "14px",
+                      lineHeight: "1.5",
+                      boxShadow: "0 4px 12px rgba(59,130,246,0.15)",
+                    }}
+                  >
+                    {item.content || ""}
+                  </div>
+                ) : (
+                  <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0", width: "100%" }} {...props} />,
+                        pre: ({node, ...props}) => (
+                          <pre style={{ 
+                            background: "rgba(0,0,0,0.04)", 
+                            padding: "16px", 
+                            borderRadius: "8px", 
+                            overflow: "auto",
+                            fontSize: "13px",
+                            margin: "1.5em 0",
+                            width: "100%",
+                            boxSizing: "border-box"
+                          }} {...props} />
+                        )
+                      }}
+                    >
+                      {item.content || ""}
+                    </ReactMarkdown>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        ) : summaryText ? (
+          <div style={{ 
+            color: "var(--text-primary)", 
+            lineHeight: "1.7", 
+            fontSize: "15px",
+            width: "100%",
+            background: "rgba(0,0,0,0.02)",
+            padding: "20px",
+            borderRadius: "12px"
+          }}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{summaryText}</ReactMarkdown>
+          </div>
+        ) : (
+          <div style={{ padding: "40px", textAlign: "center", color: "var(--text-secondary)", fontStyle: "italic" }}>
+            暂无对话内容记录
+          </div>
+        )}
       </div>
 
       {/* 关联文件列表 */}
       {relatedFiles.length > 0 && (
-        <div>
+        <div style={{ marginTop: "12px", padding: "20px", background: "rgba(0,0,0,0.02)", borderRadius: "12px", width: "100%", boxSizing: "border-box" }}>
           <div
             style={{
               fontSize: "14px",
               fontWeight: 600,
               color: "var(--text-primary)",
-              marginBottom: "12px",
+              marginBottom: "16px",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -80,7 +165,7 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
                   border: "none",
                   padding: 0,
                   cursor: "pointer",
-                  color: "#3b82f6",
+                  color: "var(--accent-color)",
                   fontSize: "12px",
                 }}
               >
@@ -88,36 +173,34 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
               </button>
             )}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
             {displayFiles.map((file, i) => (
-              <button
+              <div
                 key={i}
-                type="button"
                 onClick={() => onFileClick?.(file.path)}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   gap: "10px",
-                  padding: "10px 12px",
-                  background: "rgba(255,255,255,0.9)",
+                  padding: "10px",
+                  background: "#fff",
                   border: "1px solid var(--border-color)",
                   borderRadius: "8px",
                   cursor: "pointer",
-                  textAlign: "left",
-                  transition: "background 0.15s",
+                  transition: "all 0.2s",
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(0,0,0,0.02)";
+                  e.currentTarget.style.borderColor = "var(--accent-color)";
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "rgba(255,255,255,0.9)";
+                  e.currentTarget.style.borderColor = "var(--border-color)";
                 }}
               >
                 <span style={{ fontSize: "16px" }}>📄</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div
                     style={{
-                      fontSize: "13px",
+                      fontSize: "12px",
                       fontWeight: 500,
                       color: "var(--text-primary)",
                       overflow: "hidden",
@@ -127,30 +210,12 @@ export function SessionViewer({ session, onFileClick }: SessionViewerProps) {
                   >
                     {file.name}
                   </div>
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      color: "var(--text-secondary)",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {file.path}
-                  </div>
                 </div>
-                <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>→</span>
-              </button>
+              </div>
             ))}
           </div>
         </div>
       )}
-
-      {session.closed_at ? (
-        <div style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
-          结束时间：{new Date(session.closed_at).toLocaleString()}
-        </div>
-      ) : null}
     </div>
   );
 }

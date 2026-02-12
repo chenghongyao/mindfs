@@ -138,19 +138,17 @@ func (s *Service) BuildPrompt(in BuildPromptInput) string {
 	serverCtx, err := ctxbuilder.BuildServerContext(
 		in.Session.Type,
 		in.Manager.Root(),
-		in.ClientContext.CurrentPath,
 		in.ClientContext.CurrentView,
-		in.Manager,
 	)
 	if err != nil {
 		return ctxbuilder.BuildUserPrompt(in.Message, in.ClientContext)
 	}
-	systemPrompt := ctxbuilder.BuildSystemPrompt(in.Session.Type, serverCtx)
+	serverPrompt := ctxbuilder.BuildServerPrompt(in.Session.Type, serverCtx)
 	userPrompt := ctxbuilder.BuildUserPrompt(in.Message, in.ClientContext)
-	if systemPrompt == "" {
+	if serverPrompt == "" {
 		return userPrompt
 	}
-	return "系统上下文:\n" + systemPrompt + "\n\n用户输入:\n" + userPrompt
+	return serverPrompt + "\n\n" + userPrompt
 }
 
 type AppendAgentReplyInput struct {

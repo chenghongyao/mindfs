@@ -14,7 +14,7 @@
 
 - **[02-agent-process.md](./02-agent-process.md)** - Agent 进程管理、ACP 通信协议、Transport Handler
 - **[03-session-management.md](./03-session-management.md)** - Session 生命周期、状态流转、数据模型
-- **[04-context-building.md](./04-context-building.md)** - Agent 上下文构建、初始上下文、关联 Session
+- **[04-context-building.md](./04-context-building.md)** - Agent 上下文构建、初始上下文、Session 独立性
 - **[05-view-routing.md](./05-view-routing.md)** - 视图路由系统、匹配规则、视图数据模型
 - **[06-file-system.md](./06-file-system.md)** - 文件系统管理、.mindfs/ 目录结构、文件元数据
 - **[07-api-design.md](./07-api-design.md)** - REST API + WebSocket 协议 + 错误处理 + 错误码定义

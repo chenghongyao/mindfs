@@ -59,6 +59,10 @@ class SessionService {
   private listeners = new Set<(event: SessionServiceEvent) => void>();
   private reconnectTimer: number | null = null;
   private rootId: string | null = null;
+  private contextCache = new Map<
+    string,
+    { currentPath: string; selectionKey: string }
+  >();
 
   connect(rootId: string) {
     if (this.ws?.readyState === WebSocket.OPEN && this.rootId === rootId) {
@@ -104,6 +108,47 @@ class SessionService {
       this.ws.close();
       this.ws = null;
     }
+    this.contextCache.clear();
+  }
+
+  private buildSelectionKey(selection: unknown): string {
+    if (!selection || typeof selection !== "object") return "";
+    const raw = selection as Record<string, unknown>;
+    const filePath = typeof raw.file_path === "string" ? raw.file_path : "";
+    const start = typeof raw.start === "number" ? raw.start : -1;
+    const end = typeof raw.end === "number" ? raw.end : -1;
+    const text = typeof raw.text === "string" ? raw.text : "";
+    return `${filePath}:${start}:${end}:${text}`;
+  }
+
+  private compactContext(
+    sessionKey: string,
+    context?: Record<string, unknown>
+  ): Record<string, unknown> | undefined {
+    if (!context) return undefined;
+    const next = { ...context };
+    const currentPath =
+      typeof next.currentPath === "string"
+        ? next.currentPath
+        : typeof next.current_path === "string"
+        ? (next.current_path as string)
+        : "";
+    const selection =
+      next.selection && typeof next.selection === "object"
+        ? (next.selection as Record<string, unknown>)
+        : undefined;
+    const selectionKey = this.buildSelectionKey(selection);
+
+    const prev = this.contextCache.get(sessionKey);
+    if (prev && prev.currentPath === currentPath) {
+      delete next.currentPath;
+      delete next.current_path;
+    }
+    if (prev && prev.selectionKey === selectionKey) {
+      delete next.selection;
+    }
+    this.contextCache.set(sessionKey, { currentPath, selectionKey });
+    return next;
   }
 
   private scheduleReconnect() {
@@ -181,7 +226,7 @@ class SessionService {
         throw new Error("Failed to create session");
       }
       const data = await res.json();
-      return data.session as Session;
+      return data as Session;
     } catch (err) {
       console.error("[Session] Failed to create session:", err);
       return null;
@@ -206,7 +251,7 @@ class SessionService {
         root_id: rootId,
         session_key: sessionKey,
         content,
-        context,
+        context: this.compactContext(sessionKey, context),
       },
     };
 
@@ -246,21 +291,23 @@ class SessionService {
         throw new Error("Failed to fetch sessions");
       }
       const data = await res.json();
-      return Array.isArray(data.sessions) ? data.sessions : [];
+      return Array.isArray(data) ? data : [];
     } catch (err) {
       console.error("[Session] Failed to fetch sessions:", err);
       return [];
     }
   }
 
-  async getSession(sessionKey: string): Promise<Session | null> {
+  async getSession(rootId: string, sessionKey: string): Promise<Session | null> {
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionKey)}`);
+      const res = await fetch(
+        `/api/sessions/${encodeURIComponent(sessionKey)}?root=${encodeURIComponent(rootId)}`
+      );
       if (!res.ok) {
         throw new Error("Failed to get session");
       }
       const data = await res.json();
-      return data.session as Session;
+      return data as Session;
     } catch (err) {
       console.error("[Session] Failed to get session:", err);
       return null;

@@ -4,11 +4,10 @@ import (
 	"fmt"
 
 	"mindfs/server/internal/fs"
-	"mindfs/server/internal/session"
 	"mindfs/server/internal/skills"
 )
 
-func BuildServerContext(mode string, root fs.RootInfo, currentPath string, currentView *CurrentViewRef, manager *session.Manager) (ServerContext, error) {
+func BuildServerContext(mode string, root fs.RootInfo, currentView *CurrentViewRef) (ServerContext, error) {
 	dirCfg, err := skills.LoadDirConfig(root)
 	if err != nil {
 		// 配置加载失败时使用空配置，不阻断流程
@@ -16,17 +15,10 @@ func BuildServerContext(mode string, root fs.RootInfo, currentPath string, curre
 	}
 	rootPath, _ := root.RootDir()
 
-	related, err := FindRelatedSessions(manager, currentPath, 3)
-	if err != nil {
-		// 关联 Session 查找失败时使用空列表
-		related = []SessionBrief{}
-	}
-
 	ctx := ServerContext{
 		Common: CommonContext{
 			RootPath:        rootPath,
 			UserDescription: dirCfg.UserDescription,
-			RelatedSessions: related,
 		},
 	}
 

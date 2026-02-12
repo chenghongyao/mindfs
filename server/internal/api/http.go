@@ -63,9 +63,9 @@ func (h *HTTPHandler) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := make([]map[string]any, 0, len(out.Sessions))
 	for _, s := range out.Sessions {
-		payload = append(payload, sessionResponse(s))
+		payload = append(payload, sessionListResponse(s))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"sessions": payload})
+	respondJSON(w, http.StatusOK, payload)
 }
 
 func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,7 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"session": sessionResponse(out)})
+	respondJSON(w, http.StatusOK, sessionResponse(out))
 }
 
 func (h *HTTPHandler) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func (h *HTTPHandler) handleSessionCreate(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"session": sessionResponse(created)})
+	respondJSON(w, http.StatusOK, sessionResponse(created))
 }
 
 func sessionResponse(s *session.Session) map[string]any {
@@ -122,7 +122,6 @@ func sessionResponse(s *session.Session) map[string]any {
 	}
 	return map[string]any{
 		"key":              s.Key,
-		"session_key":      s.Key,
 		"type":             s.Type,
 		"agent":            s.Agent,
 		"agent_session_id": s.AgentSessionID,
@@ -138,6 +137,23 @@ func sessionResponse(s *session.Session) map[string]any {
 	}
 }
 
+func sessionListResponse(s *session.Session) map[string]any {
+	if s == nil {
+		return map[string]any{}
+	}
+	return map[string]any{
+		"key":        s.Key,
+		"type":       s.Type,
+		"agent":      s.Agent,
+		"name":       s.Name,
+		"status":     s.Status,
+		"summary":    s.Summary,
+		"created_at": s.CreatedAt,
+		"updated_at": s.UpdatedAt,
+		"closed_at":  s.ClosedAt,
+	}
+}
+
 func (h *HTTPHandler) handleViewRoutes(w http.ResponseWriter, r *http.Request) {
 	rootID := r.URL.Query().Get("root")
 	uc := &usecase.Service{Registry: h.AppContext}
@@ -149,7 +165,7 @@ func (h *HTTPHandler) handleViewRoutes(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"routes": out.Routes})
+	respondJSON(w, http.StatusOK, out.Routes)
 }
 
 func (h *HTTPHandler) handleViewPreference(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +187,7 @@ func (h *HTTPHandler) handleViewPreference(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *HTTPHandler) handleSkillExecute(w http.ResponseWriter, r *http.Request) {
@@ -198,7 +214,7 @@ func (h *HTTPHandler) handleSkillExecute(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusInternalServerError, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"result": out.Result})
+	respondJSON(w, http.StatusOK, out.Result)
 }
 
 func (h *HTTPHandler) handleDirConfigGet(w http.ResponseWriter, r *http.Request) {
@@ -274,7 +290,7 @@ func (h *HTTPHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"tree": out.Entries})
+	respondJSON(w, http.StatusOK, out.Entries)
 }
 
 func (h *HTTPHandler) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -316,7 +332,7 @@ func (h *HTTPHandler) handleFile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"file": out.File})
+	respondJSON(w, http.StatusOK, out.File)
 }
 
 func (h *HTTPHandler) handleDirs(w http.ResponseWriter, _ *http.Request) {
@@ -336,7 +352,7 @@ func (h *HTTPHandler) handleDirs(w http.ResponseWriter, _ *http.Request) {
 			"updated_at":   dir.UpdatedAt,
 		})
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"dirs": resp})
+	respondJSON(w, http.StatusOK, resp)
 }
 
 func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
@@ -374,19 +390,17 @@ func (h *HTTPHandler) handleFileMeta(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if out.Meta == nil {
-		respondJSON(w, http.StatusOK, map[string]any{"meta": nil})
+		respondJSON(w, http.StatusOK, nil)
 		return
 	}
 
 	respondJSON(w, http.StatusOK, map[string]any{
-		"meta": map[string]any{
-			"source_session": out.Meta.SourceSession,
-			"session_name":   out.Meta.SessionName,
-			"agent":          out.Meta.Agent,
-			"created_at":     out.Meta.CreatedAt,
-			"updated_at":     out.Meta.UpdatedAt,
-			"created_by":     out.Meta.CreatedBy,
-		},
+		"source_session": out.Meta.SourceSession,
+		"session_name":   out.Meta.SessionName,
+		"agent":          out.Meta.Agent,
+		"created_at":     out.Meta.CreatedAt,
+		"updated_at":     out.Meta.UpdatedAt,
+		"created_by":     out.Meta.CreatedBy,
 	})
 }
 
@@ -400,7 +414,7 @@ func (h *HTTPHandler) handleDirSkills(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"skills": out.Skills})
+	respondJSON(w, http.StatusOK, out.Skills)
 }
 
 const indexHTML = `<!doctype html>
@@ -503,7 +517,7 @@ const indexHTML = `<!doctype html>
       fetch("/api/tree?dir=.")
         .then(function (res) { return res.json(); })
         .then(function (payload) {
-          var tree = payload.tree || [];
+          var tree = Array.isArray(payload) ? payload : [];
           var treeEl = document.getElementById("tree");
           var listEl = document.getElementById("list");
           treeEl.innerHTML = "";

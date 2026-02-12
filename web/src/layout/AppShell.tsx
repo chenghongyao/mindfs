@@ -7,6 +7,7 @@ type AppShellProps = {
   rightCollapsed?: boolean;
   onToggleRight?: () => void;
   footer: React.ReactNode;
+  floating?: React.ReactNode;
 };
 
 // Breakpoints
@@ -54,15 +55,13 @@ const mainStyle: React.CSSProperties = {
 
 const footerStyle: React.CSSProperties = {
   gridArea: "footer",
-  borderTop: "1px solid var(--border-color)",
-  padding: "0 20px",
+  borderTop: "none",
+  padding: "0 12px 10px",
   display: "flex",
-  alignItems: "center",
-  gap: "12px",
-  background: "rgba(255,255,255,0.8)",
-  backdropFilter: "blur(12px)",
-  fontSize: "13px",
-  color: "var(--text-secondary)",
+  alignItems: "flex-end",
+  justifyContent: "center",
+  background: "transparent",
+  zIndex: 110, // 提到最高，防止被浮窗遮罩遮挡
 };
 
 export function AppShell({
@@ -72,6 +71,7 @@ export function AppShell({
   rightCollapsed = false,
   onToggleRight,
   footer,
+  floating,
 }: AppShellProps) {
   const { isMobile, isTablet } = useResponsive();
   const [mobileNav, setMobileNav] = useState<"files" | "main" | "sessions">("main");
@@ -90,6 +90,7 @@ export function AppShell({
           flexDirection: "column",
           height: "100vh",
           background: "linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%)",
+          position: "relative",
         }}
       >
         {/* Mobile header */}
@@ -134,10 +135,11 @@ export function AppShell({
         </header>
 
         {/* Mobile content */}
-        <div style={{ flex: 1, overflow: "auto" }}>
+        <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
           {mobileNav === "files" && sidebar}
           {mobileNav === "main" && main}
           {mobileNav === "sessions" && rightSidebar}
+          {floating}
         </div>
 
         {/* Mobile footer with action bar */}
@@ -214,11 +216,12 @@ export function AppShell({
   const shellStyle: React.CSSProperties = {
     display: "grid",
     gridTemplateColumns: `${sidebarWidth} 1fr ${rightWidth}`,
-    gridTemplateRows: "1fr 48px",
+    gridTemplateRows: "1fr auto",
     gridTemplateAreas: `"sidebar main right" "sidebar footer right"`,
     height: "100vh",
     background: "linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%)",
     color: "var(--text-primary)",
+    position: "relative",
   };
 
   const rightStyle: React.CSSProperties = {
@@ -237,6 +240,7 @@ export function AppShell({
       <main style={mainStyle}>{main}</main>
       <aside style={rightStyle}>{rightSidebar}</aside>
       <footer style={footerStyle}>{footer}</footer>
+      {floating}
       {rightSidebar && rightCollapsed ? (
         <button
           type="button"

@@ -14,6 +14,8 @@ type ModeAgentSelectorProps = {
   agents: AgentStatus[];
   onModeChange: (mode: SessionMode) => void;
   onAgentChange: (agent: string) => void;
+  compact?: boolean;
+  showLabel?: boolean;
 };
 
 const modeLabels: Record<SessionMode, string> = {
@@ -34,11 +36,12 @@ export function ModeAgentSelector({
   agents,
   onModeChange,
   onAgentChange,
+  compact = false,
+  showLabel = true,
 }: ModeAgentSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // 点击外部关闭
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -77,49 +80,52 @@ export function ModeAgentSelector({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "6px",
-          padding: "8px 12px",
-          borderRadius: "8px",
-          border: "1px solid var(--border-color)",
-          background: "#fff",
+          gap: compact ? "4px" : "6px",
+          padding: compact ? "6px 8px" : "8px 12px",
+          borderRadius: compact ? "12px" : "8px",
+          border: compact ? "none" : "1px solid var(--border-color)",
+          background: compact ? "transparent" : "#fff",
           cursor: "pointer",
-          fontSize: "13px",
+          fontSize: compact ? "16px" : "13px",
           fontWeight: 500,
           color: "var(--text-primary)",
-          minWidth: "140px",
+          minWidth: compact ? "auto" : "140px",
+          transition: "background 0.2s",
+          outline: "none",
+        }}
+        onMouseEnter={(e) => {
+          if (compact) e.currentTarget.style.background = "rgba(0,0,0,0.05)";
+        }}
+        onMouseLeave={(e) => {
+          if (compact) e.currentTarget.style.background = "transparent";
         }}
       >
         <span>{modeIcons[mode]}</span>
-        <span>{modeLabels[mode]}</span>
-        <span style={{ color: "var(--text-secondary)", margin: "0 2px" }}>·</span>
-        <span
-          style={{
-            color: currentAgent?.available ? "var(--text-primary)" : "var(--text-secondary)",
-          }}
-        >
-          {agent || "未选择"}
-        </span>
-        {currentAgent && !currentAgent.available && (
+        {showLabel && !compact && <span>{modeLabels[mode]}</span>}
+        {showLabel && !compact && <span style={{ color: "var(--text-secondary)", margin: "0 2px" }}>·</span>}
+        {showLabel && (
           <span
             style={{
-              width: "6px",
-              height: "6px",
-              borderRadius: "50%",
-              background: "#ef4444",
+              color: currentAgent?.available ? "var(--text-primary)" : "var(--text-secondary)",
+              fontSize: compact ? "12px" : "inherit",
             }}
-          />
+          >
+            {agent || "未选择"}
+          </span>
         )}
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: "10px",
-            color: "var(--text-secondary)",
-            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 0.15s",
-          }}
-        >
-          ▼
-        </span>
+        {showLabel && (
+          <span
+            style={{
+              marginLeft: compact ? "2px" : "auto",
+              fontSize: "10px",
+              color: "var(--text-secondary)",
+              transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+              transition: "transform 0.15s",
+            }}
+          >
+            ▼
+          </span>
+        )}
       </button>
 
       {/* 下拉面板 */}
@@ -127,13 +133,13 @@ export function ModeAgentSelector({
         <div
           style={{
             position: "absolute",
-            top: "calc(100% + 4px)",
-            left: 0,
+            bottom: "calc(100% + 10px)", // 向上弹出，适合底部输入框
+            left: compact ? "-10px" : 0,
             background: "#fff",
             border: "1px solid var(--border-color)",
             borderRadius: "12px",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-            zIndex: 100,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
+            zIndex: 1000,
             display: "flex",
             overflow: "hidden",
             minWidth: "320px",
@@ -177,18 +183,9 @@ export function ModeAgentSelector({
                   fontWeight: m === mode ? 500 : 400,
                   textAlign: "left",
                 }}
-                onMouseEnter={(e) => {
-                  if (m !== mode) e.currentTarget.style.background = "rgba(0,0,0,0.03)";
-                }}
-                onMouseLeave={(e) => {
-                  if (m !== mode) e.currentTarget.style.background = "transparent";
-                }}
               >
                 <span>{modeIcons[m]}</span>
                 <span>{modeLabels[m]}</span>
-                {m === mode && (
-                  <span style={{ marginLeft: "auto", fontSize: "12px" }}>✓</span>
-                )}
               </button>
             ))}
           </div>
@@ -231,14 +228,6 @@ export function ModeAgentSelector({
                   textAlign: "left",
                   opacity: a.available ? 1 : 0.6,
                 }}
-                onMouseEnter={(e) => {
-                  if (a.available && a.name !== agent)
-                    e.currentTarget.style.background = "rgba(0,0,0,0.03)";
-                }}
-                onMouseLeave={(e) => {
-                  if (a.available && a.name !== agent)
-                    e.currentTarget.style.background = "transparent";
-                }}
               >
                 <span
                   style={{
@@ -249,20 +238,6 @@ export function ModeAgentSelector({
                   }}
                 />
                 <span>{a.name}</span>
-                {a.version && (
-                  <span
-                    style={{
-                      fontSize: "10px",
-                      color: "var(--text-secondary)",
-                      marginLeft: "auto",
-                    }}
-                  >
-                    {a.version}
-                  </span>
-                )}
-                {a.name === agent && a.available && (
-                  <span style={{ marginLeft: "auto", fontSize: "12px" }}>✓</span>
-                )}
               </button>
             ))}
           </div>

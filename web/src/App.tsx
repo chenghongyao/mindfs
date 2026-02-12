@@ -36,11 +36,14 @@ export function App() {
   const [managedRootIds, setManagedRootIds] = useState<string[]>([]);
   const managedRootIdsRef = useRef<Set<string>>(new Set());
   const expandedRef = useRef<string[]>([]);
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null);
+  const selectedSessionRef = useRef<SessionSummary | null>(null);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
+  const [currentSessionExchanges, setCurrentSessionExchanges] = useState<any[]>([]);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [isFloatingOpen, setIsFloatingOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,7 +52,7 @@ export function App() {
         const dirsRes = await fetch("/api/dirs");
         const dirsPayload = await dirsRes.json();
         if (cancelled) return;
-        const dirs = (dirsPayload.dirs as ManagedDir[]) ?? [];
+        const dirs = (Array.isArray(dirsPayload) ? dirsPayload : []) as ManagedDir[];
         const ids = dirs.map((dir) => dir.id);
         managedRootIdsRef.current = new Set(ids);
         setManagedRootIds(ids);
@@ -67,7 +70,7 @@ export function App() {
         setCurrentRootId(first.path);
         const treeRes = await fetch(`/api/tree?root=${encodeURIComponent(first.path)}&dir=.`);
         const treePayload = await treeRes.json();
-        const list = Array.isArray(treePayload.tree) ? treePayload.tree : [];
+        const list = Array.isArray(treePayload) ? treePayload : [];
         if (cancelled) return;
         setEntriesByPath((prev) => ({ ...prev, [`${first.path}:.`]: list, ".": list }));
         setExpanded([first.path]);
@@ -92,10 +95,46 @@ export function App() {
     expandedRef.current = expanded;
   }, [expanded]);
 
-  const handleSelectSession = useCallback((session: SessionSummary) => {
-    setSelectedSession(session);
-    setFile(null);
-  }, []);
+  useEffect(() => {
+    selectedSessionRef.current = selectedSession;
+  }, [selectedSession]);
+
+  const handleSelectSession = useCallback(
+    async (session: any) => {
+      const key = session?.key || session?.session_key;
+      if (!currentRootId || !key) {
+        setSelectedSession(null);
+        return;
+      }
+      
+      // If selecting the active session, open the floating panel instead of replacing main view
+      if (currentSession && key === currentSession.key && currentSession.status !== "closed") {
+        setIsFloatingOpen(true);
+        const full = await sessionService.getSession(currentRootId, key);
+        if (full) {
+          setSelectedSession(full as any);
+          setCurrentSessionExchanges(full.exchanges || []);
+        }
+        return;
+      }
+
+      const full = await sessionService.getSession(currentRootId, key);
+      if (!full) return;
+      
+      if (full.status === "closed") {
+        setSelectedSession(full as any);
+        setFile(null);
+        setIsFloatingOpen(false);
+      } else {
+        // Active or idle session - show in floating panel
+        setSelectedSession(full as any);
+        setCurrentSession(full as any);
+        setCurrentSessionExchanges(full.exchanges || []);
+        setIsFloatingOpen(true);
+      }
+    },
+    [currentRootId, currentSession]
+  );
 
   const handleSendMessage = useCallback(
     async (message: string, mode: "chat" | "view" | "skill", agent: string) => {
@@ -111,6 +150,43 @@ export function App() {
         if (!session) return;
         setCurrentSession(session);
       }
+      
+      // Open floating panel
+      setIsFloatingOpen(true);
+
+      // Ensure we have the latest session info
+      const snapshot = await sessionService.getSession(currentRootId, session.key);
+      setSelectedSession((snapshot as any) ?? (session as any));
+      
+      // Do NOT setFile(null) if we are in chat/skill mode to keep context visible
+      if (mode === "view") {
+        setFile(null); // But for view generation, we might want to clear it? 
+        // Actually, maybe we keep it until the view is generated.
+      }
+
+      const nowISO = new Date().toISOString();
+      const newUserExchange = {
+        role: "user",
+        content: message,
+        timestamp: nowISO,
+      };
+
+      setCurrentSessionExchanges((prev) => [...prev, newUserExchange]);
+
+      setSelectedSession((prev: any) => {
+        if (!prev) return prev;
+        const prevKey = prev.key || prev.session_key;
+        if (prevKey !== session!.key) return prev;
+        const prevExchanges = Array.isArray(prev.exchanges) ? prev.exchanges : [];
+        return {
+          ...prev,
+          exchanges: [
+            ...prevExchanges,
+            newUserExchange,
+          ],
+        };
+      });
+
       const context = buildClientContext({
         currentRoot: currentRootId,
         currentPath: file?.path ?? selectedDir ?? undefined,
@@ -151,22 +227,19 @@ export function App() {
               type: currentSession.type,
               status: currentSession.status,
               agent: currentSession.agent,
+              exchanges: currentSessionExchanges,
             }
           : null,
         handleSendMessage,
         () => {
-          if (currentSession) {
-            setSelectedSession({
-              session_key: currentSession.key,
-              agent: currentSession.agent,
-            });
-            setFile(null);
-          }
+          setIsFloatingOpen((prev) => !prev);
         },
         rightCollapsed,
         handleToggleRight,
         handleOpenSettings,
-        settingsOpen
+        settingsOpen,
+        isFloatingOpen,
+        setIsFloatingOpen
       ),
     [
       rootEntries,
@@ -187,18 +260,29 @@ export function App() {
       handleToggleRight,
       handleOpenSettings,
       settingsOpen,
+      isFloatingOpen,
     ]
   );
-  const tree = useMemo(
-    () =>
-      selectedSession || file
-        ? shellTree
-        : mergeViewIntoShell(shellTree, viewTree),
-    [shellTree, viewTree, selectedSession, file]
-  );
+  const tree = useMemo(() => {
+    const isSelectedSessionActive =
+      currentSession &&
+      (selectedSession?.key === currentSession.key ||
+        selectedSession?.session_key === currentSession.key);
+    const showSessionInMain = selectedSession && !isSelectedSessionActive;
+
+    return showSessionInMain || file
+      ? shellTree
+      : mergeViewIntoShell(shellTree, viewTree);
+  }, [shellTree, viewTree, selectedSession, currentSession, file]);
 
   const actionHandlers = useMemo(
     () => ({
+      select_session: async (params: Record<string, unknown>) => {
+        const key = params.key as string | undefined;
+        if (key) {
+          handleSelectSession({ key });
+        }
+      },
       open: async (params: Record<string, unknown>) => {
         const path = params.path as string | undefined;
         const rootParam = params.root as string | undefined;
@@ -210,9 +294,9 @@ export function App() {
           if (root) query.set("root", root);
           const res = await fetch(`/api/file?${query.toString()}`);
           const payload = await res.json().catch(() => ({}));
-          if (res.ok && payload?.file) {
-            setFile(payload.file as FilePayload);
-            setSelectedSession(null);
+          if (res.ok && payload) {
+            setFile(payload as FilePayload);
+            setSelectedSession(null); // Clear selected history session to show file
             setStatus("Connected");
             return;
           }
@@ -236,7 +320,7 @@ export function App() {
           setCurrentRootId(path);
           const res = await fetch(`/api/tree?root=${encodeURIComponent(path)}&dir=.`);
           const payload = await res.json();
-          const list = Array.isArray(payload.tree) ? payload.tree : [];
+          const list = Array.isArray(payload) ? payload : [];
         setEntriesByPath((prev) => ({ ...prev, [`${path}:.`]: list, ".": list }));
         setExpanded((prev) => (prev.includes(path) ? prev : [...prev, path]));
         setSelectedDir(path);
@@ -252,7 +336,7 @@ export function App() {
           `/api/tree?root=${encodeURIComponent(rootId)}&dir=${encodeURIComponent(path)}`
         );
         const payload = await res.json();
-        const list = Array.isArray(payload.tree) ? payload.tree : [];
+        const list = Array.isArray(payload) ? payload : [];
         const key = `${rootId}:${path}`;
         setEntriesByPath((prev) => ({ ...prev, [key]: list, [path]: list }));
         setExpanded((prev) =>
@@ -284,7 +368,7 @@ export function App() {
         if (!res.ok) return;
         const payload = await res.json();
         if (cancelled) return;
-        const list = Array.isArray(payload.sessions) ? payload.sessions : [];
+        const list = Array.isArray(payload) ? payload : [];
         setSessions(list);
         setCurrentSession((prev) => {
           if (!prev) return prev;
@@ -302,7 +386,7 @@ export function App() {
         if (!res.ok) return;
         const payload = await res.json();
         if (cancelled) return;
-        const routes = Array.isArray(payload.routes) ? payload.routes : [];
+        const routes = Array.isArray(payload) ? payload : [];
         const first = routes.find((r: any) => r.view_data) ?? null;
         if (first?.view_data) {
           setViewTree(first.view_data as UITree);
@@ -336,6 +420,26 @@ export function App() {
         event.type === "session.resumed"
       ) {
         void loadSessions();
+        
+        if (event.sessionKey && currentRootId) {
+          void sessionService.getSession(currentRootId, event.sessionKey).then((full) => {
+            if (full) {
+              // Update floating panel data if this is the active session
+              if (currentSession?.key === event.sessionKey) {
+                setCurrentSessionExchanges(full.exchanges || []);
+              }
+              
+              // Update main view if this is the selected session
+              if (
+                (selectedSessionRef.current?.key as string | undefined) === event.sessionKey ||
+                (selectedSessionRef.current?.session_key as string | undefined) === event.sessionKey ||
+                !selectedSessionRef.current
+              ) {
+                setSelectedSession(full as any);
+              }
+            }
+          });
+        }
       }
     });
 
