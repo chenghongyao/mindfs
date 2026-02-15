@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	acpproc "mindfs/server/internal/agent/acp"
@@ -12,10 +14,12 @@ import (
 // Pool manages agent processes. Each agent type has one shared process
 // that supports multiple sessions via ACP protocol.
 type Pool struct {
-	cfg       Config
-	mu        sync.Mutex
-	processes map[string]*acpproc.Process // agentName -> process
-	sessions  map[string]*sessionEntry    // sessionKey -> entry
+	cfg        Config
+	processCtx context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	processes  map[string]*acpproc.Process // agentName -> process
+	sessions   map[string]*sessionEntry    // sessionKey -> entry
 }
 
 type sessionEntry struct {
@@ -26,24 +30,30 @@ type sessionEntry struct {
 
 // NewPool creates a new agent pool.
 func NewPool(cfg Config) *Pool {
+	processCtx, cancel := context.WithCancel(context.Background())
 	return &Pool{
-		cfg:       cfg,
-		processes: make(map[string]*acpproc.Process),
-		sessions:  make(map[string]*sessionEntry),
+		cfg:        cfg,
+		processCtx: processCtx,
+		cancel:     cancel,
+		processes:  make(map[string]*acpproc.Process),
+		sessions:   make(map[string]*sessionEntry),
 	}
 }
 
 // GetOrCreate returns an existing session handle or creates a new one.
-func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath string) (Session, error) {
+func (p *Pool) GetOrCreate(_ context.Context, sessionKey, agentName, rootPath string) (Session, error) {
 	if sessionKey == "" {
 		return nil, errors.New("session key required")
 	}
+	start := time.Now()
+	log.Printf("[agent/pool] get_or_create.begin session=%s agent=%s", sessionKey, agentName)
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Check if session already exists
 	if entry, ok := p.sessions[sessionKey]; ok {
+		log.Printf("[agent/pool] get_or_create.hit session=%s agent=%s duration_ms=%d", sessionKey, agentName, time.Since(start).Milliseconds())
 		return entry.session, nil
 	}
 
@@ -58,22 +68,31 @@ func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath 
 	if !ok {
 		args := def.BuildArgs(rootPath)
 		cwd := def.ResolveCwd(rootPath)
+		procStart := time.Now()
 		var err error
-		proc, err = acpproc.Start(ctx, def.Command, args, cwd, def.Env)
+		proc, err = acpproc.Start(p.processCtx, def.Command, args, cwd, def.Env)
 		if err != nil {
+			log.Printf("[agent/pool] get_or_create.start_process.error session=%s agent=%s duration_ms=%d err=%v", sessionKey, agentName, time.Since(procStart).Milliseconds(), err)
 			return nil, err
 		}
-		if err := proc.Initialize(ctx); err != nil {
+		log.Printf("[agent/pool] get_or_create.start_process.ok session=%s agent=%s duration_ms=%d", sessionKey, agentName, time.Since(procStart).Milliseconds())
+		initStart := time.Now()
+		if err := proc.Initialize(p.processCtx); err != nil {
 			_ = proc.Close()
+			log.Printf("[agent/pool] get_or_create.initialize.error session=%s agent=%s duration_ms=%d err=%v", sessionKey, agentName, time.Since(initStart).Milliseconds(), err)
 			return nil, err
 		}
+		log.Printf("[agent/pool] get_or_create.initialize.ok session=%s agent=%s duration_ms=%d", sessionKey, agentName, time.Since(initStart).Milliseconds())
 		p.processes[agentName] = proc
 	}
 
 	// Create a new session within the process (with its own cwd)
-	if err := proc.NewSession(ctx, sessionKey, rootPath); err != nil {
+	newSessionStart := time.Now()
+	if err := proc.NewSession(p.processCtx, sessionKey, rootPath); err != nil {
+		log.Printf("[agent/pool] get_or_create.new_session.error session=%s agent=%s duration_ms=%d err=%v", sessionKey, agentName, time.Since(newSessionStart).Milliseconds(), err)
 		return nil, err
 	}
+	log.Printf("[agent/pool] get_or_create.new_session.ok session=%s agent=%s duration_ms=%d", sessionKey, agentName, time.Since(newSessionStart).Milliseconds())
 
 	sess := &pooledSession{
 		proc:       proc,
@@ -84,6 +103,7 @@ func (p *Pool) GetOrCreate(ctx context.Context, sessionKey, agentName, rootPath 
 		sessionKey: sessionKey,
 		session:    sess,
 	}
+	log.Printf("[agent/pool] get_or_create.done session=%s agent=%s total_ms=%d", sessionKey, agentName, time.Since(start).Milliseconds())
 
 	return sess, nil
 }
@@ -107,6 +127,16 @@ func (p *Pool) Config() Config {
 	return p.cfg
 }
 
+// Context returns the pool lifecycle context (read-only).
+func (p *Pool) Context() context.Context {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.processCtx != nil {
+		return p.processCtx
+	}
+	return context.Background()
+}
+
 // CloseAll closes all processes.
 func (p *Pool) CloseAll() {
 	p.mu.Lock()
@@ -116,7 +146,13 @@ func (p *Pool) CloseAll() {
 	}
 	p.processes = make(map[string]*acpproc.Process)
 	p.sessions = make(map[string]*sessionEntry)
+	cancel := p.cancel
+	p.cancel = nil
 	p.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
 
 	for _, proc := range procs {
 		_ = proc.Close()

@@ -5,15 +5,19 @@ import (
 	"encoding/json"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/api/usecase"
 	ctxbuilder "mindfs/server/internal/context"
+	"mindfs/server/internal/fs"
 	"mindfs/server/internal/session"
 )
 
 var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+
+const sessionMessageTimeout = 10 * time.Minute
 
 // WSHandler manages JSON-RPC over WebSocket.
 type WSHandler struct {
@@ -21,6 +25,7 @@ type WSHandler struct {
 	TaskQueue  *agent.TaskQueue
 	connMu     sync.RWMutex
 	conns      map[*websocket.Conn]bool
+	fileOnce   sync.Once
 }
 
 type StreamEvent struct {
@@ -40,13 +45,6 @@ func (h *WSHandler) InitTaskListener() {
 
 // broadcastTaskUpdate sends task update to all connected clients.
 func (h *WSHandler) broadcastTaskUpdate(update agent.TaskUpdate) {
-	h.connMu.RLock()
-	conns := make([]*websocket.Conn, 0, len(h.conns))
-	for conn := range h.conns {
-		conns = append(conns, conn)
-	}
-	h.connMu.RUnlock()
-
 	resp := WSResponse{
 		Type: "task.update",
 		Payload: map[string]any{
@@ -57,10 +55,7 @@ func (h *WSHandler) broadcastTaskUpdate(update agent.TaskUpdate) {
 			"error":    update.Error,
 		},
 	}
-
-	for _, conn := range conns {
-		_ = conn.WriteJSON(resp)
-	}
+	h.broadcastWS(resp)
 }
 
 // addConn registers a connection for broadcasting.
@@ -82,6 +77,11 @@ func (h *WSHandler) removeConn(conn *websocket.Conn) {
 
 // ServeHTTP upgrades the connection and processes JSON-RPC messages.
 func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.fileOnce.Do(func() {
+		if h.AppContext != nil {
+			h.AppContext.AddFileChangeListener(h.broadcastFileChange)
+		}
+	})
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
@@ -103,6 +103,36 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.handleWSRequest(r.Context(), conn, req)
+	}
+}
+
+func (h *WSHandler) broadcastFileChange(change fs.FileChangeEvent) {
+	resp := WSResponse{
+		Type: "file.changed",
+		Payload: map[string]any{
+			"root_id": change.RootID,
+			"path":    change.Path,
+			"op":      change.Op,
+			"is_dir":  change.IsDir,
+		},
+	}
+	h.broadcastWS(resp)
+}
+
+func (h *WSHandler) snapshotConns() []*websocket.Conn {
+	h.connMu.RLock()
+	defer h.connMu.RUnlock()
+	conns := make([]*websocket.Conn, 0, len(h.conns))
+	for conn := range h.conns {
+		conns = append(conns, conn)
+	}
+	return conns
+}
+
+func (h *WSHandler) broadcastWS(resp WSResponse) {
+	conns := h.snapshotConns()
+	for _, conn := range conns {
+		_ = conn.WriteJSON(resp)
 	}
 }
 
@@ -164,7 +194,13 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 
 	uc := &usecase.Service{Registry: h.AppContext}
 	clientCtx := parseClientContext(req.Payload, rootID)
-	err := uc.SendMessage(ctx, usecase.SendMessageInput{
+	parentCtx := context.Background()
+	if agentPool := h.AppContext.GetAgentPool(); agentPool != nil {
+		parentCtx = agentPool.Context()
+	}
+	msgCtx, cancel := context.WithTimeout(parentCtx, sessionMessageTimeout)
+	defer cancel()
+	err := uc.SendMessage(msgCtx, usecase.SendMessageInput{
 		RootID:    rootID,
 		Key:       key,
 		Content:   content,

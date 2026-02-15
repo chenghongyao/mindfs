@@ -39,6 +39,7 @@ export type FilePayload = {
 export type SessionSummary = {
   key?: string;
   session_key?: string;
+  root_id?: string;
   name?: string;
   type?: "chat" | "view" | "skill";
   status?: "active" | "idle" | "closed";
@@ -52,6 +53,7 @@ export type SessionSummary = {
 
 export type CurrentSession = {
   key: string;
+  root_id?: string;
   name: string;
   type: "chat" | "view" | "skill";
   status: "active" | "idle" | "closed";
@@ -72,6 +74,8 @@ export function buildDefaultTree(
   sessions?: SessionSummary[],
   selectedSession?: SessionSummary | null,
   onSelectSession?: ((session: SessionSummary) => void) | null,
+  onOpenBubbleSession?: ((session: CurrentSession) => void) | null,
+  activeSessions?: CurrentSession[],
   currentSession?: CurrentSession | null,
   onSendMessage?: ((message: string, mode: "chat" | "view" | "skill", agent: string) => void) | null,
   onSessionClick?: (() => void) | null,
@@ -105,48 +109,55 @@ export function buildDefaultTree(
   };
 
   // 3. 浮窗逻辑
-  if (currentSession) {
-    if (isFloatingOpen) {
-      elements["agent-panel"] = {
-        key: "agent-panel",
-        type: "AgentPanel",
-        props: {
-          onClose: () => onToggleFloating?.(false),
-        },
-        children: ["agent-header", "agent-messages"]
-      };
+  if (currentSession && isFloatingOpen) {
+    elements["agent-panel"] = {
+      key: "agent-panel",
+      type: "AgentPanel",
+      props: {
+        onClose: () => onToggleFloating?.(false),
+      },
+      children: ["agent-header", "agent-messages"]
+    };
 
-      elements["agent-header"] = {
-        key: "agent-header",
-        type: "AgentHeader",
-        props: {
-          session: currentSession,
-          onClose: () => onToggleFloating?.(false),
-        }
-      };
+    elements["agent-header"] = {
+      key: "agent-header",
+      type: "AgentHeader",
+      props: {
+        session: currentSession,
+        onClose: () => onToggleFloating?.(false),
+      }
+    };
 
-      elements["agent-messages"] = {
-        key: "agent-messages",
-        type: "AgentMessageList",
-        props: {
-          session: currentSession,
-          exchanges: (currentSession as any).exchanges || [],
-          onAgentResponse: onAgentResponse || undefined,
-        }
-      };
+    elements["agent-messages"] = {
+      key: "agent-messages",
+      type: "AgentMessageList",
+      props: {
+        session: currentSession,
+        exchanges: (currentSession as any).exchanges || [],
+        onAgentResponse: onAgentResponse || undefined,
+      }
+    };
 
-      elements["floating-container"].children = ["agent-panel"];
-    } else {
-      elements["agent-bubble"] = {
-        key: "agent-bubble",
+    elements["floating-container"].children = ["agent-panel"];
+  } else if ((activeSessions || []).length > 0) {
+    const bubbles: string[] = [];
+    (activeSessions || []).forEach((session, index) => {
+      const key = `agent-bubble-${session.key}`;
+      elements[key] = {
+        key,
         type: "AgentBubble",
         props: {
-          session: currentSession,
-          onClick: () => onToggleFloating?.(true),
+          session,
+          index,
+          onClick: () => {
+            onOpenBubbleSession?.(session);
+            onToggleFloating?.(true);
+          },
         },
       };
-      elements["floating-container"].children = ["agent-bubble"];
-    }
+      bubbles.push(key);
+    });
+    elements["floating-container"].children = bubbles;
   }
 
   // 4. 侧边栏与文件树

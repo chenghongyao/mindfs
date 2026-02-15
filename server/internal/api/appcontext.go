@@ -25,8 +25,9 @@ type AppContext struct {
 	Agents *agent.Pool
 	Prober *agent.Prober
 
-	mu    sync.RWMutex
-	roots map[string]*RootContext // root id -> root context
+	mu                  sync.RWMutex
+	roots               map[string]*RootContext // root id -> root context
+	fileChangeListeners []func(fs.FileChangeEvent)
 }
 
 func (s *AppContext) GetRootContext(rootID string) (*RootContext, error) {
@@ -129,6 +130,7 @@ func (s *AppContext) GetFileWatcher(rootID string, manager *session.Manager) (*f
 	if err != nil {
 		return nil, err
 	}
+	watcher.SetOnFileChange(s.emitFileChange)
 	rootCtx.Watcher = watcher
 	return watcher, nil
 }
@@ -183,6 +185,24 @@ func (s *AppContext) ListRoots() []fs.RootInfo {
 		return []fs.RootInfo{}
 	}
 	return s.Dirs.List()
+}
+
+func (s *AppContext) AddFileChangeListener(listener func(fs.FileChangeEvent)) {
+	if listener == nil {
+		return
+	}
+	s.mu.Lock()
+	s.fileChangeListeners = append(s.fileChangeListeners, listener)
+	s.mu.Unlock()
+}
+
+func (s *AppContext) emitFileChange(change fs.FileChangeEvent) {
+	s.mu.RLock()
+	listeners := append([]func(fs.FileChangeEvent){}, s.fileChangeListeners...)
+	s.mu.RUnlock()
+	for _, listener := range listeners {
+		listener(change)
+	}
 }
 
 type auditLoggerAdapter struct {

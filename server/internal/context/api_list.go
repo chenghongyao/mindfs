@@ -69,16 +69,6 @@ func LoadAPIList() []APIEndpoint {
 		},
 		// View API
 		{
-			Method:      "GET",
-			Path:        "/api/view/routes",
-			Description: "获取匹配的视图路由列表（含视图数据）",
-			Params: []ParamDef{
-				{Name: "root", Type: "string", Required: true, Description: "管理目录 ID"},
-				{Name: "path", Type: "string", Required: false, Description: "文件/目录路径，用于路由匹配"},
-			},
-			Response: "{ routes: ResolvedView[] }",
-		},
-		{
 			Method:      "POST",
 			Path:        "/api/view/preference",
 			Description: "保存用户视图偏好",

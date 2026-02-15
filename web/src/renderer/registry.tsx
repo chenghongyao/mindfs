@@ -296,7 +296,12 @@ const AgentInputNode: React.FC<ComponentProps> = ({ element }) => {
 };
 
 const AgentBubbleNode: React.FC<ComponentProps> = ({ element }) => (
-  <AgentBubble session={(element.props?.session as any) ?? null} isStreaming={(element.props?.isStreaming as boolean) ?? false} onClick={(element.props?.onClick as any) ?? undefined} />
+  <AgentBubble
+    session={(element.props?.session as any) ?? null}
+    index={(element.props?.index as number) ?? 0}
+    isStreaming={(element.props?.isStreaming as boolean) ?? false}
+    onClick={(element.props?.onClick as any) ?? undefined}
+  />
 );
 
 const AssociationViewNode: React.FC<ComponentProps> = ({ element }) => {

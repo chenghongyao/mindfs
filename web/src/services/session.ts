@@ -76,6 +76,7 @@ type SessionEventHandler = {
 type SessionServiceEvent = {
   type: string;
   sessionKey?: string;
+  payload?: Record<string, unknown>;
 };
 
 class SessionService {
@@ -190,7 +191,7 @@ class SessionService {
     const type = msg.type as string;
     const payload = msg.payload || {};
     const sessionKey = payload.session_key as string;
-    this.emit({ type, sessionKey });
+    this.emit({ type, sessionKey, payload });
 
     if (!sessionKey) return;
 
@@ -236,15 +237,18 @@ class SessionService {
   async createSession(
     rootId: string,
     type: SessionType,
-    agent: string
+    agent: string,
+    name?: string
   ): Promise<Session | null> {
     try {
+      const sessionName = typeof name === "string" ? name.trim() : "";
       const res = await fetch(`/api/sessions?root=${encodeURIComponent(rootId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type,
           agent,
+          name: sessionName || undefined,
         }),
       });
       if (!res.ok) {

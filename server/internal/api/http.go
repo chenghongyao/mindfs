@@ -44,8 +44,6 @@ func (h *HTTPHandler) Routes() http.Handler {
 	// Agent status API
 	r.Get("/api/agents", h.handleAgentsList)
 
-	// View routes API
-	r.Get("/api/view/routes", h.handleViewRoutes)
 	r.Post("/api/view/preference", h.handleViewPreference)
 
 	return r
@@ -152,20 +150,6 @@ func sessionListResponse(s *session.Session) map[string]any {
 	}
 }
 
-func (h *HTTPHandler) handleViewRoutes(w http.ResponseWriter, r *http.Request) {
-	rootID := r.URL.Query().Get("root")
-	uc := h.service()
-	out, err := uc.ListViewRoutes(r.Context(), usecase.ListViewRoutesInput{
-		RootID: rootID,
-		Path:   r.URL.Query().Get("path"),
-	})
-	if err != nil {
-		respondError(w, http.StatusNotFound, err)
-		return
-	}
-	respondJSON(w, http.StatusOK, out.Routes)
-}
-
 func (h *HTTPHandler) handleViewPreference(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RootID  string `json:"root_id"`
@@ -245,7 +229,10 @@ func (h *HTTPHandler) handleTree(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, out.Entries)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"entries":     out.Entries,
+		"view_routes": out.ViewRoutes,
+	})
 }
 
 func (h *HTTPHandler) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +274,10 @@ func (h *HTTPHandler) handleFile(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusBadRequest, err)
 		return
 	}
-	respondJSON(w, http.StatusOK, out.File)
+	respondJSON(w, http.StatusOK, map[string]any{
+		"file":        out.File,
+		"view_routes": out.ViewRoutes,
+	})
 }
 
 func (h *HTTPHandler) handleDirs(w http.ResponseWriter, _ *http.Request) {

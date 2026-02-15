@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"mindfs/server/internal/fs"
+	"mindfs/server/internal/router"
 )
 
 type ListTreeInput struct {
@@ -15,7 +17,8 @@ type ListTreeInput struct {
 }
 
 type ListTreeOutput struct {
-	Entries []fs.Entry
+	Entries    []fs.Entry
+	ViewRoutes []router.ResolvedView
 }
 
 type OpenFileRawInput struct {
@@ -33,6 +36,7 @@ func (s *Service) ListTree(_ context.Context, in ListTreeInput) (ListTreeOutput,
 	if err := s.ensureRegistry(); err != nil {
 		return ListTreeOutput{}, err
 	}
+	s.ensureFileWatcher(in.RootID)
 	root, err := s.Registry.GetRoot(in.RootID)
 	if err != nil {
 		return ListTreeOutput{}, err
@@ -48,7 +52,8 @@ func (s *Service) ListTree(_ context.Context, in ListTreeInput) (ListTreeOutput,
 	if err != nil {
 		return ListTreeOutput{}, err
 	}
-	return ListTreeOutput{Entries: entries}, nil
+	routes := s.listViewRoutes(in.RootID, dir)
+	return ListTreeOutput{Entries: entries, ViewRoutes: routes}, nil
 }
 
 func (s *Service) OpenFileRaw(_ context.Context, in OpenFileRawInput) (OpenFileRawOutput, error) {
@@ -76,13 +81,15 @@ type ReadFileInput struct {
 }
 
 type ReadFileOutput struct {
-	File fs.ReadResult
+	File       fs.ReadResult
+	ViewRoutes []router.ResolvedView
 }
 
 func (s *Service) ReadFile(ctx context.Context, in ReadFileInput) (ReadFileOutput, error) {
 	if err := s.ensureRegistry(); err != nil {
 		return ReadFileOutput{}, err
 	}
+	s.ensureFileWatcher(in.RootID)
 	root, err := s.Registry.GetRoot(in.RootID)
 	if err != nil {
 		return ReadFileOutput{}, err
@@ -101,7 +108,8 @@ func (s *Service) ReadFile(ctx context.Context, in ReadFileInput) (ReadFileOutpu
 	meta = fillFileMetaSessionInfo(ctx, s, in.RootID, meta)
 	result.Root = root.ID
 	result.FileMeta = meta
-	return ReadFileOutput{File: result}, nil
+	routes := s.listViewRoutes(in.RootID, in.Path)
+	return ReadFileOutput{File: result, ViewRoutes: routes}, nil
 }
 
 func fillFileMetaSessionInfo(ctx context.Context, s *Service, rootID string, meta []fs.FileMetaEntry) []fs.FileMetaEntry {
@@ -203,4 +211,27 @@ func (s *Service) AddManagedDir(_ context.Context, in AddManagedDirInput) (AddMa
 		return AddManagedDirOutput{}, err
 	}
 	return AddManagedDirOutput{Dir: dir}, nil
+}
+
+func (s *Service) listViewRoutes(rootID, path string) []router.ResolvedView {
+	vm, err := s.Registry.GetViewManager(rootID)
+	if err != nil || vm == nil {
+		return nil
+	}
+	routes, err := vm.Routes(path)
+	if err != nil {
+		return nil
+	}
+	return routes
+}
+
+func (s *Service) ensureFileWatcher(rootID string) {
+	if strings.TrimSpace(rootID) == "" {
+		return
+	}
+	manager, err := s.Registry.GetSessionManager(rootID)
+	if err != nil || manager == nil {
+		return
+	}
+	_, _ = s.Registry.GetFileWatcher(rootID, manager)
 }

@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"log"
+	"time"
 
 	"mindfs/server/internal/agent"
 	ctxbuilder "mindfs/server/internal/context"
@@ -182,30 +183,41 @@ type SendMessageInput struct {
 }
 
 func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
+	start := time.Now()
+	log.Printf("[session/send] begin root=%s session=%s content_chars=%d", in.RootID, in.Key, len(in.Content))
 	if err := s.ensureRegistry(); err != nil {
 		return err
 	}
+	t0 := time.Now()
 	manager, err := s.Registry.GetSessionManager(in.RootID)
 	if err != nil {
 		return err
 	}
+	log.Printf("[session/send] get_manager session=%s duration_ms=%d", in.Key, time.Since(t0).Milliseconds())
+	t1 := time.Now()
 	before, err := manager.Get(ctx, in.Key)
 	if err != nil {
 		return err
 	}
+	log.Printf("[session/send] load_session_before session=%s duration_ms=%d", in.Key, time.Since(t1).Milliseconds())
 	isInitial := len(before.Exchanges) == 0
+	t2 := time.Now()
 	_, err = manager.AddExchange(ctx, in.Key, "user", in.Content)
 	if err != nil {
 		return err
 	}
+	log.Printf("[session/send] append_user_exchange session=%s duration_ms=%d", in.Key, time.Since(t2).Milliseconds())
+	t3 := time.Now()
 	current, err := manager.Get(ctx, in.Key)
 	if err != nil {
 		return err
 	}
+	log.Printf("[session/send] load_session_after session=%s duration_ms=%d", in.Key, time.Since(t3).Milliseconds())
 	agentPool := s.Registry.GetAgentPool()
 	if agentPool == nil {
 		return nil
 	}
+	t4 := time.Now()
 	watcher, watcherErr := s.Registry.GetFileWatcher(in.RootID, manager)
 	if watcherErr != nil {
 		log.Printf("[watcher] root=%s session=%s get_failed err=%v", in.RootID, current.Key, watcherErr)
@@ -216,8 +228,10 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	} else {
 		log.Printf("[watcher] root=%s session=%s unavailable", in.RootID, current.Key)
 	}
+	log.Printf("[session/send] prepare_watcher session=%s duration_ms=%d", in.Key, time.Since(t4).Milliseconds())
 	root := manager.Root()
 	rootAbs, _ := root.RootDir()
+	t5 := time.Now()
 	sess, err := agentPool.GetOrCreate(ctx, current.Key, current.Agent, rootAbs)
 	if err != nil {
 		if prober := s.Registry.GetProber(); prober != nil {
@@ -225,7 +239,9 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		}
 		return err
 	}
+	log.Printf("[session/send] get_or_create_agent_session session=%s agent=%s duration_ms=%d", in.Key, current.Agent, time.Since(t5).Milliseconds())
 
+	t6 := time.Now()
 	prompt := s.BuildPrompt(BuildPromptInput{
 		Session:       current,
 		Manager:       manager,
@@ -233,6 +249,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		ClientContext: in.ClientCtx,
 		IsInitial:     isInitial,
 	})
+	log.Printf("[session/send] build_prompt session=%s prompt_chars=%d duration_ms=%d", in.Key, len(prompt), time.Since(t6).Milliseconds())
 	var responseText string
 	sess.OnUpdate(func(update agent.Event) {
 		if update.Type == agent.EventTypeToolCall {
@@ -257,18 +274,27 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 			in.OnUpdate(update)
 		}
 	})
+	t7 := time.Now()
 	if err := sess.SendMessage(ctx, prompt); err != nil {
 		if prober := s.Registry.GetProber(); prober != nil {
 			prober.ReportFailure(current.Agent, err)
 		}
 		return err
 	}
+	log.Printf("[session/send] agent_send_message_done session=%s duration_ms=%d", in.Key, time.Since(t7).Milliseconds())
 	if prober := s.Registry.GetProber(); prober != nil {
 		prober.ReportSuccess(current.Agent)
 	}
-	return s.AppendAgentReply(ctx, AppendAgentReplyInput{
+	t8 := time.Now()
+	err = s.AppendAgentReply(ctx, AppendAgentReplyInput{
 		RootID:  in.RootID,
 		Key:     in.Key,
 		Content: responseText,
 	})
+	log.Printf("[session/send] append_agent_reply session=%s duration_ms=%d", in.Key, time.Since(t8).Milliseconds())
+	if err != nil {
+		return err
+	}
+	log.Printf("[session/send] done root=%s session=%s total_ms=%d", in.RootID, in.Key, time.Since(start).Milliseconds())
+	return nil
 }

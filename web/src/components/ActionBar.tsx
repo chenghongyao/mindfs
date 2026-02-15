@@ -1,5 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { ModeAgentSelector, type SessionMode } from "./ModeAgentSelector";
+import { type SessionMode } from "./ModeSelector";
+import { ModeSelector } from "./ModeSelector";
+import { AgentSelector } from "./AgentSelector";
 import { fetchAgents, type AgentStatus } from "../services/agents";
 
 type SessionInfo = {
@@ -168,7 +170,7 @@ export function ActionBar({
             color: "var(--text-primary)",
             outline: "none",
             resize: "none",
-            padding: isMultiLine ? "12px 14px 36px" : "12px 100px 12px 14px", 
+            padding: isMultiLine ? "12px 14px 36px" : "12px 120px 12px 14px", 
             minHeight: "44px",
             maxHeight: "240px",
             lineHeight: "20px",
@@ -205,14 +207,16 @@ export function ActionBar({
             />
           )}
 
-          <ModeAgentSelector
+          <ModeSelector
             mode={mode}
+            onModeChange={setMode}
+            compact={true}
+          />
+          <AgentSelector
             agent={agent}
             agents={agents}
-            onModeChange={setMode}
             onAgentChange={setAgent}
             compact={true}
-            showLabel={false}
           />
 
           <button

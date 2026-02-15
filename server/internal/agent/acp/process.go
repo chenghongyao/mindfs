@@ -8,6 +8,7 @@ import (
 	"log"
 	"os/exec"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 )
@@ -25,6 +26,14 @@ type Process struct {
 	mu           sync.RWMutex
 	sessions     map[string]*sessionState // sessionKey -> state
 	sessionsByID map[string]*sessionState // ACP session id -> state
+	capability   CapabilitySnapshot
+}
+
+type CapabilitySnapshot struct {
+	LoadSession           bool
+	PromptSupportsAudio   bool
+	PromptSupportsImage   bool
+	PromptSupportsContext bool
 }
 
 type sessionState struct {
@@ -194,6 +203,8 @@ func (c *mindfsClient) KillTerminalCommand(ctx context.Context, params acp.KillT
 
 // Start spawns an agent process with ACP mode.
 func Start(ctx context.Context, command string, args []string, cwd string, env map[string]string) (*Process, error) {
+	start := time.Now()
+	log.Printf("[agent/acp] process.start.begin command=%s args=%v cwd=%s", command, args, cwd)
 	cmd := exec.CommandContext(ctx, command, args...)
 	if cwd != "" {
 		cmd.Dir = cwd
@@ -216,6 +227,7 @@ func Start(ctx context.Context, command string, args []string, cwd string, env m
 	cmd.Stderr = nil
 
 	if err := cmd.Start(); err != nil {
+		log.Printf("[agent/acp] process.start.error command=%s duration_ms=%d err=%v", command, time.Since(start).Milliseconds(), err)
 		return nil, err
 	}
 
@@ -228,14 +240,16 @@ func Start(ctx context.Context, command string, args []string, cwd string, env m
 
 	// Create ACP connection - coder/acp-go-sdk uses io.Writer and io.Reader directly
 	proc.conn = acp.NewClientSideConnection(proc.client, stdin, stdout)
+	log.Printf("[agent/acp] process.start.done command=%s pid=%d duration_ms=%d", command, cmd.Process.Pid, time.Since(start).Milliseconds())
 
 	return proc, nil
 }
 
 // Initialize performs ACP handshake.
 func (p *Process) Initialize(ctx context.Context) error {
+	start := time.Now()
 	// Send initialize request
-	_, err := p.conn.Initialize(ctx, acp.InitializeRequest{
+	resp, err := p.conn.Initialize(ctx, acp.InitializeRequest{
 		ProtocolVersion: acp.ProtocolVersionNumber,
 		ClientCapabilities: acp.ClientCapabilities{
 			Terminal: true,
@@ -245,16 +259,32 @@ func (p *Process) Initialize(ctx context.Context) error {
 			Version: "1.0.0",
 		},
 	})
-	return err
+
+	if err != nil {
+		log.Printf("[agent/acp] process.initialize.error duration_ms=%d err=%v", time.Since(start).Milliseconds(), err)
+		return err
+	}
+	p.capability = CapabilitySnapshot{
+		LoadSession:           resp.AgentCapabilities.LoadSession,
+		PromptSupportsAudio:   resp.AgentCapabilities.PromptCapabilities.Audio,
+		PromptSupportsImage:   resp.AgentCapabilities.PromptCapabilities.Image,
+		PromptSupportsContext: resp.AgentCapabilities.PromptCapabilities.EmbeddedContext,
+	}
+	respBytes, _ := resp.MarshalJSON()
+	log.Printf("[agent/acp] %s process.initialize.done duration_ms=%d, init response=%s", p.cmd.Path, time.Since(start).Milliseconds(), string(respBytes))
+	return nil
 }
 
 // NewSession creates a new ACP session for the given MindFS session key.
 func (p *Process) NewSession(ctx context.Context, sessionKey, cwd string) error {
+	start := time.Now()
+	log.Printf("[agent/acp] session.new.begin session_key=%s cwd=%s", sessionKey, cwd)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	// Check if session already exists
 	if _, ok := p.sessions[sessionKey]; ok {
+		log.Printf("[agent/acp] session.new.hit session_key=%s duration_ms=%d", sessionKey, time.Since(start).Milliseconds())
 		return nil
 	}
 
@@ -263,6 +293,7 @@ func (p *Process) NewSession(ctx context.Context, sessionKey, cwd string) error 
 		McpServers: []acp.McpServer{},
 	})
 	if err != nil {
+		log.Printf("[agent/acp] session.new.error session_key=%s duration_ms=%d err=%v", sessionKey, time.Since(start).Milliseconds(), err)
 		return err
 	}
 
@@ -271,6 +302,7 @@ func (p *Process) NewSession(ctx context.Context, sessionKey, cwd string) error 
 	}
 	p.sessions[sessionKey] = sess
 	p.sessionsByID[string(resp.SessionId)] = sess
+	log.Printf("[agent/acp] session.new.done session_key=%s session_id=%s duration_ms=%d", sessionKey, resp.SessionId, time.Since(start).Milliseconds())
 	return nil
 }
 
@@ -284,6 +316,7 @@ func (p *Process) SetOnUpdate(sessionKey string, onUpdate func(SessionUpdate)) {
 
 // SendMessage sends a prompt to a specific session.
 func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) error {
+	start := time.Now()
 	sess := p.getSessionByKey(sessionKey)
 
 	if sess == nil {
@@ -310,7 +343,7 @@ func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) e
 			SessionID: string(sess.ID),
 		})
 	}
-	log.Printf("[agent/acp] send.done session_key=%s session_id=%s", sessionKey, sess.ID)
+	log.Printf("[agent/acp] send.done session_key=%s session_id=%s duration_ms=%d", sessionKey, sess.ID, time.Since(start).Milliseconds())
 
 	return nil
 }
@@ -341,6 +374,11 @@ func (p *Process) SessionID(sessionKey string) string {
 		return string(sess.ID)
 	}
 	return ""
+}
+
+// Capability returns agent capabilities reported by initialize response.
+func (p *Process) Capability() CapabilitySnapshot {
+	return p.capability
 }
 
 func (p *Process) getSessionByKey(sessionKey string) *sessionState {

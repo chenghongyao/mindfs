@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -19,24 +18,27 @@ type SharedFileWatcher struct {
 	watcher      *fsnotify.Watcher
 	sessionStore SessionFileRecorder
 
-	mu             sync.RWMutex
-	sessions       map[string]*sessionInfo
-	pendingWrites  map[string]string
-	lastActiveKey  string
-	lastActiveTime time.Time
+	mu            sync.RWMutex
+	sessions      map[string]*sessionInfo
+	pendingWrites map[string]string
+	onFileChange  func(FileChangeEvent)
 
 	done chan struct{}
 }
-
-const activeSessionFallbackWindow = 5 * time.Minute
 
 type SessionFileRecorder interface {
 	RecordOutputFile(ctx context.Context, key, path string) error
 }
 
 type sessionInfo struct {
-	key        string
-	lastActive time.Time
+	key string
+}
+
+type FileChangeEvent struct {
+	RootID string `json:"root_id"`
+	Path   string `json:"path"`
+	Op     string `json:"op"`
+	IsDir  bool   `json:"is_dir"`
 }
 
 func NewSharedFileWatcher(root RootInfo, sessions SessionFileRecorder) (*SharedFileWatcher, error) {
@@ -63,10 +65,7 @@ func NewSharedFileWatcher(root RootInfo, sessions SessionFileRecorder) (*SharedF
 func (sw *SharedFileWatcher) RegisterSession(sessionKey string) {
 	sw.mu.Lock()
 	defer sw.mu.Unlock()
-	now := time.Now()
-	sw.sessions[sessionKey] = &sessionInfo{key: sessionKey, lastActive: now}
-	sw.lastActiveKey = sessionKey
-	sw.lastActiveTime = now
+	sw.sessions[sessionKey] = &sessionInfo{key: sessionKey}
 }
 
 func (sw *SharedFileWatcher) UnregisterSession(sessionKey string) {
@@ -78,28 +77,10 @@ func (sw *SharedFileWatcher) UnregisterSession(sessionKey string) {
 			delete(sw.pendingWrites, path)
 		}
 	}
-	if sw.lastActiveKey == sessionKey {
-		sw.lastActiveKey = ""
-		var latestTime time.Time
-		for _, info := range sw.sessions {
-			if info.lastActive.After(latestTime) {
-				latestTime = info.lastActive
-				sw.lastActiveKey = info.key
-			}
-		}
-		sw.lastActiveTime = latestTime
-	}
 }
 
 func (sw *SharedFileWatcher) MarkSessionActive(sessionKey string) {
-	sw.mu.Lock()
-	defer sw.mu.Unlock()
-	now := time.Now()
-	if info, ok := sw.sessions[sessionKey]; ok {
-		info.lastActive = now
-	}
-	sw.lastActiveKey = sessionKey
-	sw.lastActiveTime = now
+	_ = sessionKey
 }
 
 func (sw *SharedFileWatcher) RecordPendingWrite(sessionKey, filePath string) {
@@ -110,12 +91,6 @@ func (sw *SharedFileWatcher) RecordPendingWrite(sessionKey, filePath string) {
 	}
 	filePath = filepath.ToSlash(filePath)
 	sw.pendingWrites[filePath] = sessionKey
-	now := time.Now()
-	if info, ok := sw.sessions[sessionKey]; ok {
-		info.lastActive = now
-	}
-	sw.lastActiveKey = sessionKey
-	sw.lastActiveTime = now
 }
 
 func (sw *SharedFileWatcher) RecordSessionFile(sessionKey, filePath string) {
@@ -135,6 +110,12 @@ func (sw *SharedFileWatcher) RecordSessionFile(sessionKey, filePath string) {
 	}
 	_ = sw.sessionStore.RecordOutputFile(context.Background(), sessionKey, relPath)
 	_ = sw.root.UpdateFileMeta(relPath, sessionKey, "agent")
+}
+
+func (sw *SharedFileWatcher) SetOnFileChange(handler func(FileChangeEvent)) {
+	sw.mu.Lock()
+	sw.onFileChange = handler
+	sw.mu.Unlock()
 }
 
 func (sw *SharedFileWatcher) SessionCount() int {
@@ -163,30 +144,56 @@ func (sw *SharedFileWatcher) run() {
 			if !ok {
 				return
 			}
-			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 {
+			if event.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
 				continue
 			}
 			if sw.shouldIgnore(event.Name) {
 				continue
 			}
 			log.Printf("[watcher] event op=%s path=%s", event.Op.String(), event.Name)
-			info, err := os.Stat(event.Name)
-			if err != nil {
-				log.Printf("[watcher] stat_failed op=%s path=%s err=%v", event.Op.String(), event.Name, err)
-				continue
-			}
-			if info.IsDir() {
-				if rel, err := sw.root.NormalizePath(event.Name); err == nil {
-					_ = sw.addWatchRecursive(rel)
-					log.Printf("[watcher] dir_event op=%s rel=%s action=watch_recursive", event.Op.String(), rel)
-				}
-				continue
-			}
 			rel, err := sw.root.NormalizePath(event.Name)
 			if err != nil {
 				log.Printf("[watcher] normalize_failed op=%s path=%s err=%v", event.Op.String(), event.Name, err)
 				continue
 			}
+			if event.Op&fsnotify.Remove != 0 {
+				sw.emitFileChange(FileChangeEvent{
+					RootID: sw.root.ID,
+					Path:   rel,
+					Op:     event.Op.String(),
+					IsDir:  false,
+				})
+				continue
+			}
+			info, err := os.Stat(event.Name)
+			if err != nil {
+				// File might disappear quickly during rename/remove races.
+				sw.emitFileChange(FileChangeEvent{
+					RootID: sw.root.ID,
+					Path:   rel,
+					Op:     event.Op.String(),
+					IsDir:  false,
+				})
+				log.Printf("[watcher] stat_failed op=%s path=%s err=%v", event.Op.String(), event.Name, err)
+				continue
+			}
+			if info.IsDir() {
+				sw.emitFileChange(FileChangeEvent{
+					RootID: sw.root.ID,
+					Path:   rel,
+					Op:     event.Op.String(),
+					IsDir:  true,
+				})
+				_ = sw.addWatchRecursive(rel)
+				log.Printf("[watcher] dir_event op=%s rel=%s action=watch_recursive", event.Op.String(), rel)
+				continue
+			}
+			sw.emitFileChange(FileChangeEvent{
+				RootID: sw.root.ID,
+				Path:   rel,
+				Op:     event.Op.String(),
+				IsDir:  false,
+			})
 			sessionKey := sw.resolveSessionKey(rel)
 			log.Printf("[watcher] file_event op=%s rel=%s session=%s", event.Op.String(), rel, sessionKey)
 			if sessionKey == "" {
@@ -210,10 +217,16 @@ func (sw *SharedFileWatcher) resolveSessionKey(relPath string) string {
 		delete(sw.pendingWrites, relPath)
 		return sessionKey
 	}
-	if sw.lastActiveKey != "" && time.Since(sw.lastActiveTime) < activeSessionFallbackWindow {
-		return sw.lastActiveKey
-	}
 	return ""
+}
+
+func (sw *SharedFileWatcher) emitFileChange(change FileChangeEvent) {
+	sw.mu.RLock()
+	handler := sw.onFileChange
+	sw.mu.RUnlock()
+	if handler != nil {
+		handler(change)
+	}
 }
 
 func (sw *SharedFileWatcher) addWatchRecursive(startRel string) error {
