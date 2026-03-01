@@ -163,36 +163,38 @@ export function SessionViewer({ session, interactionMode = "main", onToggleMode,
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "transparent" }}>
-      <header style={{ height: "36px", padding: "0 16px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", background: "transparent", boxSizing: "border-box", zIndex: 10, flexShrink: 0 }}>
-        <h1 style={{ fontSize: "14px", fontWeight: 600, margin: 0 }}>{displayName}</h1>
-        <div style={{ marginLeft: "auto" }}>
-          <button
-            type="button"
-            onClick={() => onToggleMode?.(interactionMode === "main" ? "floating" : "main")}
-            style={{
-              border: "1px solid var(--border-color)",
-              background: "rgba(0,0,0,0.03)",
-              borderRadius: "6px",
-              padding: "2px 6px",
-              cursor: "pointer",
-              color: "var(--text-primary)",
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            title={interactionMode === "main" ? "浮框模式" : "主视图模式"}
-            aria-label={interactionMode === "main" ? "浮框模式" : "主视图模式"}
-          >
-            <img
-              src="/assets/ui/floating-mode.svg"
-              alt=""
-              width={16}
-              height={16}
-              style={{ display: "block" }}
-            />
-          </button>
-        </div>
-      </header>
+      {interactionMode === "floating" ? null : (
+        <header style={{ height: "36px", padding: "0 16px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", background: "transparent", boxSizing: "border-box", zIndex: 10, flexShrink: 0 }}>
+          <h1 style={{ fontSize: "14px", fontWeight: 600, margin: 0 }}>{displayName}</h1>
+          <div style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              onClick={() => onToggleMode?.("floating")}
+              style={{
+                border: "1px solid var(--border-color)",
+                background: "rgba(0,0,0,0.03)",
+                borderRadius: "6px",
+                padding: "2px 6px",
+                cursor: "pointer",
+                color: "var(--text-primary)",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+              title="浮框模式"
+              aria-label="浮框模式"
+            >
+              <img
+                src="/assets/ui/floating-mode.svg"
+                alt=""
+                width={16}
+                height={16}
+                style={{ display: "block" }}
+              />
+            </button>
+          </div>
+        </header>
+      )}
 
       {/* 滚动容器 */}
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden", position: "relative" }}>

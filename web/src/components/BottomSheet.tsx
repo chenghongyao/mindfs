@@ -18,24 +18,50 @@ export function BottomSheet({
   onFullScreen,
 }: BottomSheetProps) {
   const [isAnimating, setIsAnimating] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
-    if (isOpen) {
-      setIsAnimating(true);
-    }
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    if (isOpen) setIsAnimating(true);
+    return () => window.removeEventListener('resize', handleResize);
   }, [isOpen]);
 
   if (!isOpen && !isAnimating) return null;
 
+  const pcStyles: React.CSSProperties = {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "75vh",
+    borderRadius: "16px 16px 0 0",
+    opacity: isOpen ? 1 : 0,
+    pointerEvents: isOpen ? "auto" : "none",
+    transform: isOpen ? "translateY(0)" : "translateY(20px)",
+  };
+
+  const mobileStyles: React.CSSProperties = {
+    position: "fixed",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    width: "100%",
+    height: "75vh",
+    borderTopLeftRadius: "20px",
+    borderTopRightRadius: "20px",
+    transform: isOpen ? "translateY(0)" : "translateY(100%)",
+  };
+
   return (
     <>
-      {/* Overlay */}
+      {/* Overlay: 点击抽屉外任意区域关闭（包含空白、文件区、会话列表区） */}
       <div
         style={{
           position: "fixed",
           inset: 0,
-          background: "rgba(0,0,0,0.3)",
-          backdropFilter: "blur(2px)",
+          background: isMobile ? "rgba(0,0,0,0.3)" : "transparent",
           zIndex: 1000,
           opacity: isOpen ? 1 : 0,
           transition: "opacity 0.3s ease-out",
@@ -44,58 +70,31 @@ export function BottomSheet({
         onClick={onClose}
       />
 
-      {/* Sheet */}
+      {/* Sheet / Floating Panel */}
       <div
         style={{
-          position: "fixed",
-          left: 0,
-          right: 0,
-          bottom: 0,
-          height: "60vh",
-          background: "var(--content-bg, #fff)",
-          borderTopLeftRadius: "20px",
-          borderTopRightRadius: "20px",
-          boxShadow: "0 -8px 32px rgba(0,0,0,0.1)",
+          background: window.matchMedia("(prefers-color-scheme: dark)").matches ? "#111827" : "#ffffff",
+          boxShadow: "0 -4px 24px rgba(0,0,0,0.08)",
           zIndex: 1001,
           display: "flex",
           flexDirection: "column",
-          transform: isOpen ? "translateY(0)" : "translateY(100%)",
-          transition: "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          overflow: "hidden",
+          border: "none",
+          ...(isMobile ? mobileStyles : pcStyles)
         }}
         onTransitionEnd={() => {
           if (!isOpen) setIsAnimating(false);
         }}
       >
-        {/* Handle */}
+        {/* Handle Area (Compressed) */}
         <div 
           style={{ 
-            width: "100%", height: "24px", display: "flex", justifyContent: "center", alignItems: "center", cursor: "ns-resize" 
+            width: "100%", height: "12px", display: "flex", justifyContent: "center", alignItems: "center", cursor: "ns-resize", flexShrink: 0 
           }}
           onClick={onFullScreen}
         >
-          <div style={{ width: "40px", height: "4px", background: "rgba(0,0,0,0.1)", borderRadius: "2px" }} />
-        </div>
-
-        {/* Header */}
-        <div style={{ padding: "0 16px 12px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: 600 }}>{title || "AI Assistant"}</h3>
-          <div style={{ display: "flex", gap: "12px" }}>
-            {onFullScreen && (
-              <button 
-                onClick={onFullScreen}
-                style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", padding: "4px", opacity: 0.6 }}
-                title="全屏"
-              >
-                ⛶
-              </button>
-            )}
-            <button 
-              onClick={onClose}
-              style={{ background: "none", border: "none", fontSize: "18px", cursor: "pointer", padding: "4px", opacity: 0.6 }}
-            >
-              ✕
-            </button>
-          </div>
+          <div style={{ width: "32px", height: "3px", background: "rgba(0,0,0,0.1)", borderRadius: "2px" }} />
         </div>
 
         {/* Content */}

@@ -33,19 +33,53 @@ export function SessionList({
   onSelect,
   onRestore,
 }: SessionListProps) {
-  if (!sessions.length) {
-    return (
-      <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "8px 0" }}>
-        暂无会话记录
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-      {sessions.map((session) => (
-        <SessionCard key={session.key} session={session} selected={session.key === selectedKey} onSelect={onSelect} onRestore={onRestore} />
-      ))}
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "transparent" }}>
+      {/* 统一的 Header 边栏 */}
+      <div
+        style={{
+          height: "36px",
+          display: "flex",
+          alignItems: "center",
+          padding: "0 16px",
+          borderBottom: "1px solid var(--border-color)",
+          flexShrink: 0,
+          boxSizing: "border-box",
+        }}
+      >
+        <h3
+          style={{
+            margin: 0,
+            fontSize: "11px",
+            fontWeight: 700,
+            color: "var(--text-secondary)",
+            letterSpacing: "0.5px",
+            textTransform: "uppercase",
+          }}
+        >
+          SESSIONS
+        </h3>
+      </div>
+
+      <div style={{ flex: 1, overflow: "auto", padding: "8px" }}>
+        {!sessions.length ? (
+          <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "12px 8px" }}>
+            暂无会话记录
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {sessions.map((session) => (
+              <SessionCard
+                key={session.key}
+                session={session}
+                selected={session.key === selectedKey}
+                onSelect={onSelect}
+                onRestore={onRestore}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

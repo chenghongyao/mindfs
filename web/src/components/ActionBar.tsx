@@ -166,7 +166,7 @@ export function ActionBar({
     }
   }, [isDragging, handleDragEnd]);
 
-  const isSelectedAgentUnavailable = agents.find((a) => a.name === agent)?.available === false;
+  const isSelectedAgentUnavailable = agents.length > 0 ? agents.find((a) => a.name === agent)?.available === false : false;
   const canSend = input.trim() && isConnected && !sending && agent && !isSelectedAgentUnavailable;
 
   return (
@@ -238,8 +238,27 @@ export function ActionBar({
             {/* 滑动蓝点 */}
             <div 
               onMouseDown={handleDragStart} onTouchStart={handleDragStart}
-              onClick={() => { if (Math.abs(dragX) < 5 && !isSessionInMain) onSessionClick?.(); }}
-              style={{ width: "10px", height: "10px", borderRadius: "50%", background: !currentSession ? "transparent" : (currentSession.pending ? "#3b82f6" : "#2563eb"), border: !currentSession ? "2px solid #9ca3af" : "none", boxShadow: (currentSession && !currentSession.pending) ? "0 0 8px rgba(37, 99, 235, 0.6)" : "none", margin: "0 8px", cursor: "grab", transform: `translateX(${dragX}px)`, transition: isDragging ? "none" : "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)", position: "relative", zIndex: 10 }}
+              onClick={() => {
+                if (Math.abs(dragX) < 5) {
+                  onSessionClick?.();
+                }
+              }}
+              style={{ 
+                width: "10px", 
+                height: "10px", 
+                borderRadius: "50%", 
+                background: !currentSession ? "transparent" : (currentSession.pending ? "#3b82f6" : "#2563eb"),
+                border: !currentSession ? "2px solid #9ca3af" : "none",
+                boxShadow: (currentSession && !currentSession.pending) ? "0 0 8px rgba(37, 99, 235, 0.6)" : "none",
+                margin: "0 8px",
+                cursor: "pointer",
+                transform: `translateX(${dragX}px)`,
+                transition: isDragging ? "none" : "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                position: "relative",
+                zIndex: 10,
+                opacity: 1,
+              }} 
+
               title="左滑新建会话"
             >
               {isDragging && dragX < -10 && (
