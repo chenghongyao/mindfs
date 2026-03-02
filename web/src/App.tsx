@@ -555,8 +555,8 @@ export function App() {
   const selectedRoot = (selectedSession?.root_id as string | undefined) || currentRootId || "";
   const selectedInCurrentRoot = !!selectedSession && !!currentRootId && selectedRoot === currentRootId;
   const actionBarSession = activeBoundSessionKey
-    ? ({ ...currentSession, pending: false } as any)
-    : (selectedInCurrentRoot ? ({ ...selectedSession, pending: true } as any) : null);
+    ? (currentSession as any)
+    : (selectedInCurrentRoot ? ({ ...selectedSession, pending: false } as any) : null);
 
   return (
     <AppShell
@@ -566,17 +566,41 @@ export function App() {
       rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} />}
       main={
         <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", position: "relative" }}>
-          <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>
+          {!isMobile && <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>
             <button onClick={() => setIsLeftOpen(!isLeftOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isLeftOpen && !isMobile ? 0 : 1 }}>📁</button>
             <button onClick={() => setIsRightOpen(!isRightOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isRightOpen && !isMobile ? 0 : 1 }}>🕒</button>
-          </div>
+          </div>}
           <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             {selectedSession && interactionMode !== "drawer" ? (
-              <SessionViewer session={getSessionSnapshot(selectedSession.root_id || currentRootId, selectedSession)} />
+              <SessionViewer
+                session={getSessionSnapshot(selectedSession.root_id || currentRootId, selectedSession)}
+                onFileClick={(path) => {
+                  const root = (selectedSession.root_id as string | undefined) || currentRootIdRef.current;
+                  if (!root) return;
+                  actionHandlers.open({ path, root });
+                }}
+              />
             ) : file ? (
               <FileViewer
                 file={file}
-                onSessionClick={handleSelectSession}
+                onSessionClick={(sessionKey) => {
+                  if (!sessionKey) return;
+                  const root = file.root || currentRootIdRef.current;
+                  if (!root) return;
+                  const matched = sessions.find((item) => {
+                    const key = item.key || item.session_key;
+                    return key === sessionKey;
+                  });
+                  if (matched) {
+                    handleSelectSession(matched);
+                    return;
+                  }
+                  handleSelectSession({
+                    key: sessionKey,
+                    session_key: sessionKey,
+                    root_id: root,
+                  });
+                }}
                 onPathClick={(path) => {
                   const root = file.root || currentRootIdRef.current;
                   if (!root) return;
@@ -599,7 +623,7 @@ export function App() {
           </div>
         </div>
       }
-      footer={<ActionBar status={status} agentsVersion={agentsVersion} currentSession={actionBarSession} onSendMessage={handleSendMessage} onNewSession={handleNewSession} onSessionClick={() => {
+      footer={<ActionBar status={status} agentsVersion={agentsVersion} currentSession={actionBarSession} onSendMessage={handleSendMessage} onNewSession={handleNewSession} onToggleLeftSidebar={() => setIsLeftOpen((v) => !v)} onToggleRightSidebar={() => setIsRightOpen((v) => !v)} onSessionClick={() => {
         const rootID = currentRootIdRef.current;
         if (!activeBoundSessionKey) return;
         const selectedKey = selectedSession?.key || selectedSession?.session_key;
@@ -608,7 +632,11 @@ export function App() {
         setInteractionMode("drawer");
         setDrawerOpenForRoot(rootID, !(drawerOpenByRootRef.current[rootID || ""] || false));
       }} />}
-      drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{currentSession ? <SessionViewer session={getSessionSnapshot(currentRootId, currentSession)} interactionMode="drawer" /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
+      drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{currentSession ? <SessionViewer session={getSessionSnapshot(currentRootId, currentSession)} interactionMode="drawer" onFileClick={(path) => {
+        const root = currentRootIdRef.current;
+        if (!root) return;
+        actionHandlers.open({ path, root });
+      }} /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
     />
   );
 }

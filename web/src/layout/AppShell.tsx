@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 
 type AppShellProps = {
   sidebar: React.ReactNode;
@@ -111,7 +111,7 @@ export function AppShell({
     top: 0,
     bottom: 0,
     [side]: 0,
-    width: side === 'left' ? "85vw" : "75vw",
+    width: "75vw",
     zIndex: 2000,
     background: "var(--sidebar-bg)",
     boxShadow: side === 'left' ? "4px 0 24px rgba(0,0,0,0.15)" : "-4px 0 24px rgba(0,0,0,0.15)",

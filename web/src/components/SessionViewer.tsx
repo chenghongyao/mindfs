@@ -73,6 +73,13 @@ const formatToolCallResult = (toolCall: Partial<ToolCall>): string => {
   return "";
 };
 
+function normalizeMarkdownContent(content: string): string {
+  if (!content) return "";
+  // Some historical messages contain fenced code blocks without a leading newline,
+  // e.g. "text...```lang". Markdown won't parse that as a block.
+  return content.replace(/([^\n])```/g, "$1\n```");
+}
+
 export function SessionViewer({ session, interactionMode = "main", onFileClick }: SessionViewerProps) {
   const [showAllFiles, setShowAllFiles] = useState(false);
   const scrollEndRef = useRef<HTMLDivElement>(null);
@@ -130,7 +137,9 @@ export function SessionViewer({ session, interactionMode = "main", onFileClick }
       );
     }
     const isUser = item.type === "user_text";
-    const hideAssistantMeta = !isUser && isStreaming && idx === timeline.length - 1;
+    const next = idx + 1 < timeline.length ? timeline[idx + 1] : null;
+    const hasFollowingAssistantFlow = !isUser && !!next && next.type !== "user_text";
+    const hideAssistantMeta = !isUser && (hasFollowingAssistantFlow || (isStreaming && idx === timeline.length - 1));
     const time = formatTime(item.timestamp);
     return (
       <div key={idx} style={{ alignSelf: isUser ? "flex-end" : "flex-start", width: isUser ? "auto" : "100%", maxWidth: isUser ? "80%" : "100%", position: "relative", display: 'flex', flexDirection: 'column' }}>
@@ -145,7 +154,7 @@ export function SessionViewer({ session, interactionMode = "main", onFileClick }
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
                 p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0" }} {...props} />,
                 pre: ({node, ...props}) => <pre style={{ background: "rgba(0,0,0,0.04)", padding: "16px", borderRadius: "8px", overflow: "auto", fontSize: "13px", margin: "1em 0" }} {...props} />
-              }}>{item.content || ""}</ReactMarkdown>
+              }}>{normalizeMarkdownContent(item.content || "")}</ReactMarkdown>
             </div>
             {!hideAssistantMeta && (
               <span style={{ alignSelf: 'flex-start', display: "inline-flex", alignItems: "center", gap: "6px", fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginTop: '-10px', marginBottom: '4px' }}>
@@ -163,7 +172,7 @@ export function SessionViewer({ session, interactionMode = "main", onFileClick }
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "transparent" }}>
       {interactionMode === "drawer" ? null : (
         <header style={{ height: "36px", padding: "0 16px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", background: "transparent", boxSizing: "border-box", zIndex: 10, flexShrink: 0 }}>
-          <h1 style={{ fontSize: "14px", fontWeight: 600, margin: 0 }}>{displayName}</h1>
+          <h1 style={{ fontSize: "14px", fontWeight: 600, margin: 0, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</h1>
         </header>
       )}
 
@@ -188,19 +197,16 @@ export function SessionViewer({ session, interactionMode = "main", onFileClick }
 
             {/* 关联文件区域 */}
             {relatedFiles.length > 0 && (
-              <div style={{ marginTop: "12px", padding: "16px 20px", background: "rgba(0,0,0,0.03)", borderRadius: "16px", width: "100%", boxSizing: "border-box", border: "1px solid rgba(0,0,0,0.02)" }}>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)", marginBottom: "12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span>关联文件</span>
-                    <span style={{ fontSize: '10px', background: 'rgba(0,0,0,0.06)', color: 'var(--text-secondary)', padding: '1px 6px', borderRadius: '10px' }}>{relatedFiles.length}</span>
-                  </div>
-                  {hasMoreFiles && <button type="button" onClick={() => setShowAllFiles(!showAllFiles)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--accent-color)", fontSize: "12px" }}>{showAllFiles ? "收起" : "查看全部"}</button>}
+              <div style={{ marginTop: "4px", width: "100%", boxSizing: "border-box" }}>
+                <div style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-secondary)", marginBottom: "6px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span>关联文件 {relatedFiles.length}</span>
+                  {hasMoreFiles && <button type="button" onClick={() => setShowAllFiles(!showAllFiles)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-secondary)", fontSize: "11px" }}>{showAllFiles ? "收起" : "更多"}</button>}
                 </div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "8px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                   {displayFiles.map((file, i) => (
-                    <div key={i} onClick={() => onFileClick?.(file.path)} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", background: "#fff", border: "1px solid rgba(0,0,0,0.05)", borderRadius: "8px", cursor: "pointer", transition: "all 0.2s" }} onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--accent-color)"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.05)"; }} onMouseLeave={(e) => { e.currentTarget.style.borderColor = "rgba(0,0,0,0.05)"; e.currentTarget.style.boxShadow = "none"; }}>
-                      <img src={`https://api.iconify.design/lucide:file-text.svg?color=%2394a3b8`} alt="file" style={{ width: 16, height: 16 }} />
-                      <div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: "13px", fontWeight: 500, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div></div>
+                    <div key={i} onClick={() => onFileClick?.(file.path)} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "3px 6px", borderRadius: "6px", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(0,0,0,0.04)"; }} onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+                      <img src={`https://api.iconify.design/lucide:file-text.svg?color=%2394a3b8`} alt="file" style={{ width: 13, height: 13, flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0, fontSize: "12px", color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{file.name}</div>
                     </div>
                   ))}
                 </div>

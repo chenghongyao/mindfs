@@ -55,7 +55,7 @@ export function AgentSelector({
           display: "flex",
           alignItems: "center",
           gap: "4px",
-          padding: "6px 8px",
+          padding: compact ? "4px 4px" : "6px 8px",
           borderRadius: "12px",
           border: "none",
           background: "transparent",
@@ -101,14 +101,16 @@ export function AgentSelector({
         <div
           style={{
             position: "absolute",
-            bottom: "calc(100% + 10px)",
+            bottom: "calc(100% + 8px)",
             right: 0,
             background: "#fff",
             border: "1px solid var(--border-color)",
             borderRadius: "12px",
             boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
             zIndex: 1000,
-            width: "200px",
+            width: "max-content",
+            minWidth: "140px",
+            maxWidth: "min(80vw, 260px)",
             padding: "8px 0",
           }}
         >
@@ -147,6 +149,7 @@ export function AgentSelector({
                 fontWeight: a.name === agent ? 500 : 400,
                 textAlign: "left",
                 opacity: a.available ? 1 : 0.6,
+                whiteSpace: "nowrap",
               }}
             >
               <AgentIcon agentName={a.name} style={{ width: "16px", height: "16px", marginRight: "4px" }} />

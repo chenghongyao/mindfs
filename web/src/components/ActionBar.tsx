@@ -19,6 +19,8 @@ type ActionBarProps = {
   onSendMessage?: (message: string, mode: SessionMode, agent: string) => void;
   onNewSession?: () => void;
   onSessionClick?: () => void;
+  onToggleLeftSidebar?: () => void;
+  onToggleRightSidebar?: () => void;
 };
 
 const modePlaceholders: Record<SessionMode, string> = {
@@ -50,6 +52,8 @@ export function ActionBar({
   onSendMessage,
   onNewSession,
   onSessionClick,
+  onToggleLeftSidebar,
+  onToggleRightSidebar,
 }: ActionBarProps) {
   const [mode, setMode] = useState<SessionMode>("chat");
   const [agent, setAgent] = useState("");
@@ -169,32 +173,48 @@ export function ActionBar({
 
   const isSelectedAgentUnavailable = agents.length > 0 ? agents.find((a) => a.name === agent)?.available === false : false;
   const canSend = input.trim() && isConnected && !sending && agent && !isSelectedAgentUnavailable;
+  const hasBoundSession = !!currentSession;
+  const isBoundPending = !!currentSession?.pending;
 
   return (
     <div style={{ width: "100%", padding: isMobile ? "0" : "0 16px 12px", display: "flex", justifyContent: "center", boxSizing: "border-box", background: "var(--content-bg)" }}>
-      <div style={{ width: "100%", maxWidth: "1000px", display: "flex", flexDirection: "column", gap: isMobile ? "0" : "6px" }}>
-        <div
-          style={{
-            background: isMobile ? "#fff" : (isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.5)"),
-            border: isFocused
-              ? "1px solid var(--accent-color)"
-              : (isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.15)"),
-            borderRadius: isMobile ? "0" : "12px",
-            boxShadow: isMobile
-              ? "none"
-              : (isFocused
-                  ? (isDark ? "0 0 0 3px rgba(59, 130, 246, 0.2)" : "0 4px 24px rgba(37, 99, 235, 0.1)")
-                  : "0 4px 12px rgba(0,0,0,0.02)"),
-            display: "flex",
-            alignItems: "center",
-            position: "relative",
-            transition: isDragging ? "none" : "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-            minHeight: "44px",
-            backdropFilter: isMobile ? "none" : "blur(8px)",
-          }}
-          onFocusCapture={() => setIsFocused(true)}
-          onBlurCapture={() => setIsFocused(false)}
-        >
+      <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: isMobile ? "0" : "6px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "28px 1fr 28px" : "1fr", alignItems: "center", gap: isMobile ? "1px" : 0, padding: isMobile ? "0 1px" : 0 }}>
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={onToggleLeftSidebar}
+              style={{ width: "28px", height: "44px", borderRadius: "0", border: "none", background: "transparent", color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: 0.86, outline: "none", boxShadow: "none", WebkitTapHighlightColor: "transparent" as any, overflow: "visible" }}
+              aria-label="打开文件侧栏"
+              title="文件侧栏"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none">
+                <path fill="currentColor" d="M3 3h6v4H3zm12 7h6v4h-6zm0 7h6v4h-6zm-2-4H7v5h6v2H5V9h2v2h6z" style={{ transform: "scale(1.28)", transformOrigin: "12px 12px" }} />
+              </svg>
+            </button>
+          ) : null}
+          <div
+            style={{
+              background: isMobile ? "#fff" : (isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.5)"),
+              border: isFocused
+                ? "1px solid var(--accent-color)"
+                : (isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.15)"),
+              borderRadius: isMobile ? "10px" : "12px",
+              boxShadow: isMobile
+                ? "none"
+                : (isFocused
+                    ? (isDark ? "0 0 0 3px rgba(59, 130, 246, 0.2)" : "0 4px 24px rgba(37, 99, 235, 0.1)")
+                    : "0 4px 12px rgba(0,0,0,0.02)"),
+              display: "flex",
+              alignItems: "center",
+              position: "relative",
+              transition: isDragging ? "none" : "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
+              minHeight: "44px",
+              backdropFilter: isMobile ? "none" : "blur(8px)",
+            }}
+            onFocusCapture={() => setIsFocused(true)}
+            onBlurCapture={() => setIsFocused(false)}
+          >
           <textarea
             ref={textareaRef}
             value={input}
@@ -212,7 +232,7 @@ export function ActionBar({
               color: "var(--text-primary)",
               outline: "none",
               resize: "none",
-              padding: isMultiLine ? "12px 14px 36px" : "12px 120px 12px 14px",
+              padding: isMultiLine ? "12px 14px 36px" : (isMobile ? "12px 96px 12px 14px" : "12px 120px 12px 14px"),
               minHeight: "44px",
               maxHeight: "240px",
               lineHeight: "20px",
@@ -223,7 +243,7 @@ export function ActionBar({
             }}
           />
 
-          <div style={{ position: "absolute", right: "8px", bottom: isMultiLine ? "6px" : "50%", transform: isMultiLine ? "none" : "translateY(50%)", display: "flex", alignItems: "center", gap: "2px", zIndex: 5, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
+          <div style={{ position: "absolute", right: isMobile ? "4px" : "8px", bottom: isMultiLine ? "6px" : "50%", transform: isMultiLine ? "none" : "translateY(50%)", display: "flex", alignItems: "center", gap: isMobile ? "0px" : "2px", zIndex: 5, transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)" }}>
             {/* 滑动蓝点 */}
             <div
               onMouseDown={handleDragStart}
@@ -236,7 +256,7 @@ export function ActionBar({
               style={{
                 width: "28px",
                 height: "28px",
-                margin: "0 4px",
+                margin: isMobile ? "0 1px" : "0 4px",
                 cursor: "pointer",
                 transform: `translateX(${dragX}px)`,
                 transition: isDragging ? "none" : "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
@@ -250,16 +270,42 @@ export function ActionBar({
               }}
               title="左滑新建会话"
             >
-              <div
-                style={{
-                  width: "10px",
-                  height: "10px",
-                  borderRadius: "50%",
-                  background: !currentSession ? "transparent" : (currentSession.pending ? "#3b82f6" : "#2563eb"),
-                  border: !currentSession ? "2px solid #9ca3af" : "none",
-                  boxShadow: (currentSession && !currentSession.pending) ? "0 0 8px rgba(37, 99, 235, 0.6)" : "none",
-                }}
-              />
+              {!hasBoundSession && (
+                <div
+                  style={{
+                    width: "12px",
+                    height: "12px",
+                    borderRadius: "50%",
+                    background: "transparent",
+                    border: "2px solid #94a3b8",
+                  }}
+                />
+              )}
+              {hasBoundSession && !isBoundPending && (
+                <div
+                  style={{
+                    width: "12px",
+                    height: "12px",
+                    borderRadius: "50%",
+                    background: "transparent",
+                    border: "2px solid #2563eb",
+                    boxShadow: "0 0 0 1px rgba(37,99,235,0.08)",
+                  }}
+                />
+              )}
+              {hasBoundSession && isBoundPending && (
+                <div
+                  style={{
+                    width: "12px",
+                    height: "12px",
+                    borderRadius: "50%",
+                    background: "#3b82f6",
+                    border: "none",
+                    boxShadow: "0 0 0 0 rgba(59,130,246,0.5)",
+                    animation: "bindPulse 1.2s ease-out infinite",
+                  }}
+                />
+              )}
               {isDragging && dragX < -10 && (
                 <div style={{ position: "absolute", right: "100%", top: "50%", transform: "translateY(-50%)", marginRight: "8px", fontSize: "10px", fontWeight: 600, color: dragX <= DRAG_THRESHOLD ? "var(--accent-color)" : "#9ca3af", whiteSpace: "nowrap", opacity: Math.min(1, Math.abs(dragX) / 20), pointerEvents: "none" }}>
                   {dragX <= DRAG_THRESHOLD ? "松开新建" : "左滑新建"}
@@ -281,8 +327,34 @@ export function ActionBar({
               )}
             </button>
           </div>
+          </div>
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={onToggleRightSidebar}
+              style={{ width: "28px", height: "44px", borderRadius: "0", border: "none", background: "transparent", color: "var(--text-secondary)", display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: 0.86, outline: "none", boxShadow: "none", WebkitTapHighlightColor: "transparent" as any, overflow: "visible" }}
+              aria-label="打开会话侧栏"
+              title="会话侧栏"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.8" strokeLinecap="round">
+                <line x1="6" y1="4" x2="18" y2="4" />
+                <line x1="6" y1="12" x2="18" y2="12" />
+                <line x1="6" y1="20" x2="18" y2="20" />
+              </svg>
+            </button>
+          ) : null}
         </div>
       </div>
+      <style>{`
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+        @keyframes bindPulse {
+          0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); }
+          70% { box-shadow: 0 0 0 7px rgba(59,130,246,0); }
+          100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+        }
+      `}</style>
     </div>
   );
 }
