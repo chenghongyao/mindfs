@@ -23,6 +23,7 @@ export type SessionItem = { key?: string; session_key?: string; root_id?: string
 type Exchange = { role: string; agent?: string; content?: string; timestamp?: string; toolCall?: any; };
 type PendingSend = { rootId: string; mode: SessionMode; agent: string; message: string; timestamp: string; };
 type URLState = { root: string; file: string; cursor: number; pluginQuery: Record<string, string> };
+const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 
 function normalizeMode(mode: SessionMode | undefined): SessionMode {
   if (mode === "plugin" || mode === "skill") return mode;
@@ -79,6 +80,36 @@ function buildURLSearch(next: URLState): string {
   });
   const encoded = params.toString();
   return encoded ? `?${encoded}` : "";
+}
+
+function pluginQueryStorageKey(root: string, file: string): string {
+  return `${PLUGIN_QUERY_STORAGE_PREFIX}${root}:${file}`;
+}
+
+function loadPersistedPluginQuery(root: string, file: string): Record<string, string> {
+  if (!root || !file) return {};
+  try {
+    const raw = window.localStorage.getItem(pluginQueryStorageKey(root, file));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const next: Record<string, string> = {};
+    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+      if (!key) return;
+      next[key] = String(value);
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function persistPluginQuery(root: string, file: string, query: Record<string, string>): void {
+  if (!root || !file) return;
+  try {
+    window.localStorage.setItem(pluginQueryStorageKey(root, file), JSON.stringify(query || {}));
+  } catch {
+  }
 }
 
 function toPluginInput(file: FilePayload, query: Record<string, string>): PluginInput {
@@ -526,9 +557,13 @@ export function App() {
       const requestedCursor = normalizeCursor(params.cursor);
       const cursor = requestedCursor === null ? 0 : requestedCursor;
       const preserveQuery = !!params.preservePluginQuery;
-      const nextPluginQuery = preserveQuery ? parsePluginQuery(window.location.search) : {};
+      const persistedQuery = loadPersistedPluginQuery(String(root), String(path));
+      const urlQuery = preserveQuery ? parsePluginQuery(window.location.search) : {};
+      // Priority: URL query > localStorage persisted query.
+      const nextPluginQuery = preserveQuery ? { ...persistedQuery, ...urlQuery } : persistedQuery;
       setPluginQuery(nextPluginQuery);
       replaceURLState({ root, file: path, cursor, pluginQuery: nextPluginQuery });
+      persistPluginQuery(String(root), String(path), nextPluginQuery);
       try {
         const fetchFileWithMode = async (mode: "full" | "incremental", timeoutMs?: number) => {
           const queryParams = new URLSearchParams({
@@ -690,6 +725,9 @@ export function App() {
           pluginQuery: nextPluginQuery,
         };
         replaceURLState(nextState);
+        if (nextState.file) {
+          persistPluginQuery(nextState.root, nextState.file, nextState.pluginQuery);
+        }
 
         const rootChanged = (nextState.root || "") !== (currentRootIdRef.current || "");
         const fileChanged = (nextState.file || "") !== (fileRef.current?.path || "");
