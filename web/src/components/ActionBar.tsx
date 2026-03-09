@@ -25,8 +25,8 @@ type ActionBarProps = {
 };
 
 const modePlaceholders: Record<SessionMode, string> = {
-  chat: "问点什么...",
-  plugin: "描述视图插件...",
+  chat: "给 agent 发消息...",
+  plugin: "描述要生成的视图插件...",
   skill: "执行技能...",
 };
 
@@ -208,6 +208,7 @@ export function ActionBar({
   const hasBoundSession = !!currentSession;
   const isBoundPending = !!currentSession?.pending;
   const showCancel = isBoundPending && !!currentSession?.key;
+  const isModeLocked = !!currentSession;
 
   return (
     <div style={{ width: "100%", padding: isMobile ? "0" : "0 16px 12px", display: "flex", justifyContent: "center", boxSizing: "border-box", background: "var(--content-bg)" }}>
@@ -320,7 +321,7 @@ export function ActionBar({
                   }}
                 />
               )}
-              {hasBoundSession && !isBoundPending && (
+              {hasBoundSession && (
                 <div
                   style={{
                     width: "12px",
@@ -332,19 +333,6 @@ export function ActionBar({
                   }}
                 />
               )}
-              {hasBoundSession && isBoundPending && (
-                <div
-                  style={{
-                    width: "12px",
-                    height: "12px",
-                    borderRadius: "50%",
-                    background: "#3b82f6",
-                    border: "none",
-                    boxShadow: "0 0 0 0 rgba(59,130,246,0.5)",
-                    animation: "bindPulse 1.2s ease-out infinite",
-                  }}
-                />
-              )}
               {isDragging && dragX < -10 && (
                 <div style={{ position: "absolute", right: "100%", top: "50%", transform: "translateY(-50%)", marginRight: "8px", fontSize: "10px", fontWeight: 600, color: dragX <= DRAG_THRESHOLD ? "var(--accent-color)" : "#9ca3af", whiteSpace: "nowrap", opacity: Math.min(1, Math.abs(dragX) / 20), pointerEvents: "none" }}>
                   {dragX <= DRAG_THRESHOLD ? "松开新建" : "左滑新建"}
@@ -352,7 +340,7 @@ export function ActionBar({
               )}
             </div>
 
-            <ModeSelector mode={mode} onModeChange={setMode} compact={true} />
+            <ModeSelector mode={mode} onModeChange={setMode} compact={true} disabled={isModeLocked} />
             <AgentSelector agent={agent} agents={agents} onAgentChange={setAgent} compact={true} warnUnavailable={isSelectedAgentUnavailable} />
 
             <button
@@ -391,11 +379,6 @@ export function ActionBar({
       <style>{`
         @keyframes spin {
           to { transform: rotate(360deg); }
-        }
-        @keyframes bindPulse {
-          0% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); }
-          70% { box-shadow: 0 0 0 7px rgba(59,130,246,0); }
-          100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
         }
       `}</style>
     </div>

@@ -6,6 +6,7 @@ type ModeSelectorProps = {
   mode: SessionMode;
   onModeChange: (mode: SessionMode) => void;
   compact?: boolean;
+  disabled?: boolean;
 };
 
 const modeLabels: Record<SessionMode, string> = {
@@ -24,9 +25,16 @@ export function ModeSelector({
   mode,
   onModeChange,
   compact = false,
+  disabled = false,
 }: ModeSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -52,7 +60,12 @@ export function ModeSelector({
     <div ref={dropdownRef} style={{ position: "relative" }}>
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (!disabled) {
+            setIsOpen(!isOpen);
+          }
+        }}
+        disabled={disabled}
         style={{
           display: "flex",
           alignItems: "center",
@@ -61,13 +74,14 @@ export function ModeSelector({
           borderRadius: "12px",
           border: "none",
           background: "transparent",
-          cursor: "pointer",
+          cursor: disabled ? "default" : "pointer",
           fontSize: "16px",
           transition: "background 0.2s",
           outline: "none",
+          opacity: disabled ? 0.7 : 1,
         }}
         onMouseEnter={(e) => {
-          if (compact) e.currentTarget.style.background = "rgba(0,0,0,0.05)";
+          if (compact && !disabled) e.currentTarget.style.background = "rgba(0,0,0,0.05)";
         }}
         onMouseLeave={(e) => {
           if (compact) e.currentTarget.style.background = "transparent";
@@ -78,7 +92,7 @@ export function ModeSelector({
         </div>
       </button>
 
-      {isOpen && (
+      {isOpen && !disabled && (
         <div
           style={{
             position: "absolute",

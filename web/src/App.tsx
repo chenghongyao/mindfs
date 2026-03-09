@@ -511,13 +511,19 @@ export function App() {
   const handleSendMessage = useCallback(async (message: string, mode: SessionMode, agent: string) => {
     const activeRoot = currentRootIdRef.current;
     if (!activeRoot) return;
-    let sendSessionKey = activeBoundSessionKey;
+    const selected = selectedSessionRef.current;
+    const selectedKey = selected?.key || selected?.session_key;
+    const isMainSessionView =
+      interactionModeRef.current !== "drawer" &&
+      !!selectedKey &&
+      (((selected as any)?.root_id as string | undefined) || activeRoot) === activeRoot;
+    let sendSessionKey = isMainSessionView && selectedKey && !selectedKey.startsWith("pending-")
+      ? selectedKey
+      : activeBoundSessionKey;
     let session: Session | null = null;
     if (sendSessionKey) {
       session = sessionCacheRef.current[rootSessionKey(activeRoot, sendSessionKey)];
     } else {
-      const selected = selectedSessionRef.current;
-      const selectedKey = selected?.key || selected?.session_key;
       if (selectedKey && !selectedKey.startsWith("pending-")) {
         sendSessionKey = selectedKey;
         session = sessionCacheRef.current[rootSessionKey(activeRoot, sendSessionKey)] || ({ ...selected, key: selectedKey } as Session);
