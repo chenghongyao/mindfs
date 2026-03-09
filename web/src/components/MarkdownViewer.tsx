@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -13,6 +13,18 @@ import "prismjs/components/prism-jsx";
 import "prismjs/components/prism-tsx";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
+
+const monoFontFamily = [
+  '"SFMono-Regular"',
+  '"Cascadia Mono"',
+  '"Sarasa Mono SC"',
+  '"Noto Sans Mono CJK SC"',
+  '"Source Han Mono SC"',
+  'Menlo',
+  'Monaco',
+  '"Courier New"',
+  'monospace',
+].join(", ");
 
 export function MarkdownViewer({ content }: { content: string }) {
   return (
@@ -34,6 +46,82 @@ export function MarkdownViewer({ content }: { content: string }) {
           h2: (props) => (
             <h2 style={{ fontSize: "20px" }} {...props} />
           ),
+          h3: (props) => (
+            <h3 style={{ fontSize: "17px", marginTop: "1.25em" }} {...props} />
+          ),
+          p: (props) => (
+            <p style={{ margin: "0 0 1em", whiteSpace: "normal" }} {...props} />
+          ),
+          ul: (props) => (
+            <ul style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...props} />
+          ),
+          ol: (props) => (
+            <ol style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...props} />
+          ),
+          li: (props) => (
+            <li style={{ margin: "0.2em 0" }} {...props} />
+          ),
+          table: (props) => (
+            <div
+              style={{
+                width: "100%",
+                overflowX: "auto",
+                margin: "1.25em 0",
+                border: "1px solid var(--border-color)",
+                borderRadius: "10px",
+                background: "rgba(0,0,0,0.02)",
+              }}
+            >
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: "14px",
+                  lineHeight: 1.6,
+                  minWidth: "520px",
+                }}
+                {...props}
+              />
+            </div>
+          ),
+          thead: (props) => (
+            <thead
+              style={{
+                background: "rgba(0,0,0,0.04)",
+              }}
+              {...props}
+            />
+          ),
+          tr: (props) => (
+            <tr
+              style={{
+                borderBottom: "1px solid var(--border-color)",
+              }}
+              {...props}
+            />
+          ),
+          th: (props) => (
+            <th
+              style={{
+                padding: "10px 12px",
+                textAlign: "left",
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+                verticalAlign: "top",
+              }}
+              {...props}
+            />
+          ),
+          td: (props) => (
+            <td
+              style={{
+                padding: "10px 12px",
+                verticalAlign: "top",
+                borderTop: "1px solid rgba(0,0,0,0.03)",
+              }}
+              {...props}
+            />
+          ),
           blockquote: (props) => (
             <blockquote style={{ 
               borderLeft: "3px solid var(--accent-color)", 
@@ -46,42 +134,7 @@ export function MarkdownViewer({ content }: { content: string }) {
               borderRadius: "0 8px 8px 0"
             }} {...props} />
           ),
-          code({ node, inline, className, children, ...props }: any) {
-            const match = /language-(\w+)/.exec(className || "");
-            const language = match ? match[1] : "";
-            
-            if (!inline && language) {
-               // Render block code with highlight
-               const codeContent = String(children).replace(/\n$/, "");
-               const grammar = Prism.languages[language] ?? Prism.languages.markup;
-               let html = codeContent;
-               try { html = Prism.highlight(codeContent, grammar, language); } catch (e) {}
-
-               return (
-                 <pre
-                    style={{
-                      background: "rgba(0,0,0,0.04)", 
-                      padding: "16px", 
-                      borderRadius: "10px", 
-                      overflow: "auto",
-                      border: "1px solid var(--border-color)",
-                      fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-                      fontSize: "13px",
-                      margin: "1.5em 0",
-                      lineHeight: "1.6",
-                      boxShadow: "none" // 强制移除阴影
-                    }}
-                 >
-                   <code 
-                      className={className} 
-                      dangerouslySetInnerHTML={{ __html: html }}
-                      style={{ textShadow: "none" }} // 强制移除文字阴影
-                      {...props} 
-                   />
-                 </pre>
-               );
-            }
-
+          code({ className, children, ...props }: any) {
             return (
               <code
                 className={className}
@@ -90,7 +143,7 @@ export function MarkdownViewer({ content }: { content: string }) {
                   padding: "2px 4px",
                   borderRadius: "4px",
                   color: "inherit",
-                  fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+                  fontFamily: monoFontFamily,
                   fontSize: "0.9em",
                 }}
                 {...props}
@@ -99,15 +152,65 @@ export function MarkdownViewer({ content }: { content: string }) {
               </code>
             );
           },
-          pre: (props) => (
-            // The 'code' component handles the <pre> wrapper for blocks usually, 
-            // but react-markdown passes <pre> then <code>. We override <code> above.
-            // So here we just pass through or strip the outer pre if we want full control in <code>.
-            // However, react-markdown default behavior puts the class on <code>.
-            // So we can leave <pre> as a simple wrapper or just <>{children}</> if we style in code.
-            // Let's keep it simple:
-            <>{props.children}</> 
-          ),
+          pre: ({ children }: any) => {
+            const codeElement = React.Children.only(children) as React.ReactElement<any>;
+            const className = codeElement?.props?.className || "";
+            const rawContent = String(codeElement?.props?.children ?? "").replace(/\n$/, "");
+            const match = /language-(\w+)/.exec(className);
+            const language = match ? match[1] : "";
+            let html = "";
+            if (language) {
+              const grammar = Prism.languages[language] ?? Prism.languages.markup;
+              try {
+                html = Prism.highlight(rawContent, grammar, language);
+              } catch {
+                html = "";
+              }
+            }
+            return (
+              <pre
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  background: "rgba(0,0,0,0.04)",
+                  padding: "16px",
+                  borderRadius: "10px",
+                  overflow: "auto",
+                  border: "1px solid var(--border-color)",
+                  fontFamily: monoFontFamily,
+                  fontSize: "13px",
+                  margin: "1.5em 0",
+                  lineHeight: "1.6",
+                  whiteSpace: "pre",
+                  tabSize: 2 as any,
+                  fontVariantLigatures: "none",
+                  boxShadow: "none",
+                }}
+              >
+                {html ? (
+                  <code
+                    className={className}
+                    dangerouslySetInnerHTML={{ __html: html }}
+                    style={{ display: "block", textShadow: "none", fontFamily: monoFontFamily }}
+                  />
+                ) : (
+                  <code
+                    className={className}
+                    style={{
+                      display: "block",
+                      textShadow: "none",
+                      fontFamily: monoFontFamily,
+                      tabSize: 2 as any,
+                      fontVariantLigatures: "none",
+                      whiteSpace: "pre",
+                    }}
+                  >
+                    {rawContent}
+                  </code>
+                )}
+              </pre>
+            );
+          },
         }}
       >
         {content}

@@ -663,7 +663,7 @@ function useFetchFile(root: string, path: string) {
 
 ### 系统提示词
 
-前端在 view plugin 模式下，将以下提示词注入 agent 上下文。  
+前端在 view plugin 模式下，将以下提示词注入 agent 上下文。
 其中 `${componentCatalog}` 由前端运行时注入，为当前可用组件的 catalog 提示词文本。
 提示词需与当前实现保持一致：`fileLoadMode` 和 `theme` 为必填，禁止生成全局 CSS 覆盖。
 
@@ -780,7 +780,7 @@ on: {
 2. 选择组件：Table 组件
 3. 生成插件代码
 4. 写入 .mindfs/plugins/csv-viewer.js
-```
+
 
 ### 交互流程
 
