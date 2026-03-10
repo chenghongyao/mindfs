@@ -432,6 +432,19 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
     }
     let handled = false;
     editor.update(() => {
+      const moveSelectionToTextEdge = (node: TextNode | null, atStart: boolean) => {
+        if (!node) {
+          $getRoot().selectEnd();
+          return;
+        }
+        if (atStart) {
+          node.select(0, 0);
+          return;
+        }
+        const size = node.getTextContentSize();
+        node.select(size, size);
+      };
+
       const selection = $getSelection();
       if (!$isRangeSelection(selection)) {
         return;
@@ -446,17 +459,7 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
       if ($isTokenNode(anchorNode)) {
         const target = forward ? anchorNode.getNextSibling() : anchorNode.getPreviousSibling();
         anchorNode.remove();
-        if ($isTextNode(target)) {
-          if (forward) {
-            target.select(0, 0);
-          } else {
-            const size = target.getTextContentSize();
-            target.select(size, size);
-          }
-        } else {
-          const root = $getRoot();
-          root.selectEnd();
-        }
+        moveSelectionToTextEdge($isTextNode(target) ? target : null, forward);
         handled = true;
         return;
       }
@@ -477,12 +480,7 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
       const target = forward ? sibling.getNextSibling() : sibling.getPreviousSibling();
       sibling.remove();
       if ($isTextNode(target)) {
-        if (forward) {
-          target.select(0, 0);
-        } else {
-          const size = target.getTextContentSize();
-          target.select(size, size);
-        }
+        moveSelectionToTextEdge(target, forward);
       } else {
         textNode.select(anchorOffset, anchorOffset);
       }

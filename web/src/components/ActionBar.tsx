@@ -382,7 +382,7 @@ export function ActionBar({
                     key={`${candidate.type}:${candidate.name}`}
                     onMouseDown={(e) => {
                       e.preventDefault();
-                      window.setTimeout(() => applyCandidate(candidate), 0);
+                      applyCandidate(candidate);
                     }}
                     role="option"
                     aria-selected={index === activeCandidateIndex}
