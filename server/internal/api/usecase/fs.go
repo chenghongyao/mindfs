@@ -43,6 +43,11 @@ func (s *Service) ListTree(_ context.Context, in ListTreeInput) (ListTreeOutput,
 	dir := in.Dir
 	if dir == "" || dir == "." {
 		dir = "."
+	} else {
+		dir, err = root.NormalizePath(dir)
+		if err != nil {
+			return ListTreeOutput{}, err
+		}
 	}
 	if err := root.ValidateRelativePath(dir); err != nil {
 		return ListTreeOutput{}, err
@@ -65,7 +70,11 @@ func (s *Service) OpenFileRaw(_ context.Context, in OpenFileRawInput) (OpenFileR
 	if in.Path == "" {
 		return OpenFileRawOutput{}, errors.New("path required")
 	}
-	file, info, relPath, err := root.OpenFile(in.Path)
+	path, err := root.NormalizePath(in.Path)
+	if err != nil {
+		return OpenFileRawOutput{}, err
+	}
+	file, info, relPath, err := root.OpenFile(path)
 	if err != nil {
 		return OpenFileRawOutput{}, err
 	}
@@ -96,11 +105,15 @@ func (s *Service) ReadFile(ctx context.Context, in ReadFileInput) (ReadFileOutpu
 	if in.Path == "" {
 		return ReadFileOutput{}, errors.New("path required")
 	}
-	result, err := root.ReadFile(in.Path, in.MaxBytes, in.Cursor, in.ReadMode)
+	path, err := root.NormalizePath(in.Path)
 	if err != nil {
 		return ReadFileOutput{}, err
 	}
-	meta, err := root.GetFileMeta(in.Path)
+	result, err := root.ReadFile(path, in.MaxBytes, in.Cursor, in.ReadMode)
+	if err != nil {
+		return ReadFileOutput{}, err
+	}
+	meta, err := root.GetFileMeta(path)
 	if err != nil {
 		return ReadFileOutput{}, err
 	}
@@ -159,7 +172,11 @@ func (s *Service) GetFileMeta(_ context.Context, in GetFileMetaInput) (GetFileMe
 	if in.Path == "" {
 		return GetFileMetaOutput{}, errors.New("path required")
 	}
-	meta, err := root.GetFileMeta(in.Path)
+	path, err := root.NormalizePath(in.Path)
+	if err != nil {
+		return GetFileMetaOutput{}, err
+	}
+	meta, err := root.GetFileMeta(path)
 	if err != nil {
 		return GetFileMetaOutput{}, err
 	}

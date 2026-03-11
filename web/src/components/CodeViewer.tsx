@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import Prism from "prismjs";
 import "prismjs/themes/prism.css";
 
@@ -40,8 +40,9 @@ const languageByExt: Record<string, string> = {
   ".md": "markdown",
 };
 
-export function CodeViewer({ content, ext }: { content: string; ext?: string }) {
+export function CodeViewer({ content, ext, targetLine }: { content: string; ext?: string; targetLine?: number; targetColumn?: number }) {
   const language = languageByExt[ext ?? ""] ?? "markup";
+  const lineRefs = useRef<Array<HTMLDivElement | null>>([]);
   
   // 计算行数
   const lines = useMemo(() => content.split("\n"), [content]);
@@ -50,6 +51,13 @@ export function CodeViewer({ content, ext }: { content: string; ext?: string }) 
     const grammar = Prism.languages[language] ?? Prism.languages.markup;
     return Prism.highlight(content, grammar, language);
   }, [content, language]);
+
+  useEffect(() => {
+    if (!targetLine || targetLine < 1) return;
+    const target = lineRefs.current[targetLine - 1];
+    if (!target) return;
+    target.scrollIntoView({ block: "center", behavior: "auto" });
+  }, [targetLine, content]);
 
   return (
     <div
@@ -79,25 +87,58 @@ export function CodeViewer({ content, ext }: { content: string; ext?: string }) 
         }}
       >
         {lines.map((_, i) => (
-          <div key={i}>{i + 1}</div>
+          <div
+            key={i}
+            ref={(node) => {
+              lineRefs.current[i] = node;
+            }}
+            style={{
+              color: targetLine === i + 1 ? "var(--accent-color)" : undefined,
+              fontWeight: targetLine === i + 1 ? 600 : undefined,
+            }}
+          >
+            {i + 1}
+          </div>
         ))}
       </div>
 
       {/* 代码内容列 */}
-      <pre
+      <div
         style={{
-          margin: 0,
-          padding: "24px 8px", // 再次缩小左侧间距
-          overflow: "visible", 
-          background: "transparent",
+          position: "relative",
           flex: 1,
         }}
       >
+        {targetLine && targetLine >= 1 && targetLine <= lines.length ? (
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              top: `${24 + (targetLine - 1) * 20}px`,
+              height: "20px",
+              background: "rgba(59, 130, 246, 0.08)",
+              borderRadius: "4px",
+              pointerEvents: "none",
+            }}
+          />
+        ) : null}
+        <pre
+          style={{
+            margin: 0,
+            padding: "24px 8px", // 再次缩小左侧间距
+            overflow: "visible",
+            background: "transparent",
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
         <code 
           style={{ whiteSpace: "pre" }}
           dangerouslySetInnerHTML={{ __html: html }} 
         />
-      </pre>
+        </pre>
+      </div>
     </div>
   );
 }

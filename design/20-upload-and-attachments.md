@@ -11,7 +11,7 @@
 本期需要补齐两条不同语义的上传链路：
 
 1. 目录视图上传：作为文件管理能力，直接写入当前目录
-2. 输入框上传：作为会话附件能力，写入 `.mindfs/upload/` 并注入到当前消息
+2. 输入框上传：作为消息附件能力，发送时写入 `.mindfs/upload/` 并注入到当前消息
 
 这两条链路都叫“上传”，但目标、存储位置、和 Session 的关系都不同，设计上必须明确拆开。
 
@@ -24,7 +24,7 @@
 3. 输入框上传支持多文件
 4. 输入框上传的文件统一保存到 `.mindfs/upload/`，按日期分桶
 5. 输入框上传结果沿用 [19-input-candidates.md](./19-input-candidates.md) 的文本协议，不引入额外 sidecar
-6. Session 中支持图片附件预览
+6. 用户消息中支持图片附件预览
 
 ---
 
@@ -56,13 +56,13 @@
 
 ### 2. 输入附件上传
 
-用户在输入框中选择文件，把文件保存到 `.mindfs/upload/`，并把引用写入当前输入内容。
+用户在输入框中选择文件；发送消息时再上传到 `.mindfs/upload/`，并把引用写入当前消息内容。
 
 特点：
 
 - 属于消息输入增强操作
 - 文件物理位置固定在 `.mindfs/upload/`
-- 会和当前消息、当前 Session 发生关联
+- 会参与当前这次消息发送
 - 支持多文件
 
 ---
@@ -86,7 +86,7 @@
 
 1. 日期使用本地服务端日期，格式固定为 `YYYY-MM-DD`
 2. 同名文件需要重命名或加唯一后缀，避免覆盖
-3. `.mindfs/upload/` 属于系统保留目录，但仍然是 root 内可引用文件
+3. `.mindfs/upload/` 是保留附件目录，不参与现有 meta/session 语义，但仍然是 root 内可引用文件
 
 目录视图上传不使用该目录，直接保存到用户当前选中的目录。
 
@@ -127,10 +127,10 @@
 行为：
 
 1. 用户在 ActionBar 中选择一个或多个文件
-2. 文件保存到 `.mindfs/upload/YYYY-MM-DD/`
+2. 用户点击发送时，前端先上传这些文件到 `.mindfs/upload/YYYY-MM-DD/`
 3. 上传成功后，把每个文件转换为统一文本 token
-4. token 追加写入输入框，参与本次发送
-5. 发送后，附件文件应记录到当前 Session 的关联信息中
+4. token 与用户原始输入拼接成最终消息，再发给后端
+5. 上传失败则本次发送中止，保留输入内容，提示用户重试
 
 多文件示例：
 
@@ -160,7 +160,7 @@
 
 ---
 
-## Session 展示
+## 消息展示
 
 ### 用户消息中的附件展示
 
@@ -198,24 +198,13 @@ type Exchange struct {
 }
 ```
 
-本期可先采用“文本协议 + 前端解析”落地，不强制修改 Session 持久化模型。
+本期采用“文本协议 + 前端解析”落地，不修改 Session 持久化模型，也不新增附件 sidecar。
 
-可选增强：
+说明：
 
-```go
-type ExchangeAttachment struct {
-    Path     string `json:"path"`
-    Name     string `json:"name"`
-    Mime     string `json:"mime,omitempty"`
-    IsImage  bool   `json:"is_image,omitempty"`
-    Source   string `json:"source,omitempty"` // input_upload / dir_upload
-}
-```
-
-是否引入该结构可在实现阶段决定：
-
-- 如果追求最小改动：仅解析文本 token
-- 如果追求稳定展示：在 Exchange 中补附件元数据
+1. 输入附件不写入 `Session.related_files`
+2. 用户消息展示所需附件信息，统一从消息文本中的 `[read file: ...]` token 解析
+3. 本期不在 `Exchange` 中持久化附件元数据
 
 ---
 
@@ -269,6 +258,7 @@ POST /api/upload?root=<rootId>&mode=<dir|attachment>
 
 - 忽略 `dir`
 - 支持多文件
+- 不关联 session
 
 返回示例：
 
@@ -313,8 +303,9 @@ POST /api/upload?root=<rootId>&mode=<dir|attachment>
 
 1. 文件选择入口
 2. 多文件上传
-3. 上传结果转 `[read file: ...]` token
-4. token 插入输入框
+3. 发送前暂存待上传文件
+4. 发送时先调用 `mode=attachment`
+5. 上传结果转 `[read file: ...]` token，并与原始输入拼接后发送
 
 ### SessionViewer
 
@@ -380,11 +371,15 @@ image (2).png
 - 默认继续遵循隐藏目录规则
 - 但上传后的 token 仍可正常引用与预览
 
-### 4. Session 关联
+### 4. 附件上传时机
 
-输入附件上传完成并发送后，建议把文件加入 Session `related_files`，方便追踪。
+输入附件建议在“点击发送”时才真正上传，而不是选中文件后立即上传。
 
-目录上传不自动加入 `related_files`。
+这样可以避免：
+
+- 用户选中文件后取消发送，产生孤儿文件
+- 用户修改输入或切换会话时，前端还要维护待清理状态
+- 上传成功但消息发送失败时，附件与消息脱节
 
 ---
 
@@ -392,6 +387,6 @@ image (2).png
 
 1. 后端新增统一上传接口
 2. 目录视图接入 `mode=dir`
-3. ActionBar 接入 `mode=attachment`
-4. 输入框 token 插入
+3. ActionBar 接入待上传文件暂存
+4. 发送链路接入 `mode=attachment` 并生成 token
 5. SessionViewer 增加图片附件展示

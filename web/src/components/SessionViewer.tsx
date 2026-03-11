@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { useSessionStream, type TimelineItem } from "../hooks/useSessionStream";
 import { ThinkingBlock } from "./stream/ThinkingBlock";
 import { ToolCallCard } from "./stream/ToolCallCard";
 import { AgentIcon } from "./AgentIcon";
 import { InlineTokenText } from "./InlineTokenText";
+import { MarkdownViewer } from "./MarkdownViewer";
 import type { ToolCall } from "../services/session";
 
 type RelatedFile = {
@@ -154,10 +153,10 @@ export function SessionViewer({ session, interactionMode = "main", onFileClick }
         ) : (
           <div style={{ width: "100%", display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
             <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={{
-                p: ({node, ...props}) => <p style={{ margin: "0 0 1em 0" }} {...props} />,
-                pre: ({node, ...props}) => <pre style={{ background: "rgba(0,0,0,0.04)", padding: "16px", borderRadius: "8px", overflow: "auto", fontSize: "13px", margin: "1em 0" }} {...props} />
-              }}>{normalizeMarkdownContent(item.content || "")}</ReactMarkdown>
+              <MarkdownViewer
+                content={normalizeMarkdownContent(item.content || "")}
+                onFileClick={onFileClick}
+              />
             </div>
             {!hideAssistantMeta && (
               <span style={{ alignSelf: 'flex-start', display: "inline-flex", alignItems: "center", gap: "6px", fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, marginTop: '-10px', marginBottom: '4px' }}>

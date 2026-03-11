@@ -14,6 +14,8 @@ type FilePayload = {
   ext?: string;
   mime?: string;
   root?: string;
+  targetLine?: number;
+  targetColumn?: number;
   file_meta?: Array<{
     source_session: string;
     session_name?: string;
@@ -34,6 +36,7 @@ type FileViewerProps = {
   file?: FilePayload | null;
   onSessionClick?: (sessionKey: string) => void;
   onPathClick?: (path: string) => void;
+  onFileClick?: (path: string) => void;
 };
 
 function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string; onPathClick?: (path: string) => void }) {
@@ -72,7 +75,7 @@ function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string;
   );
 }
 
-export function FileViewer({ file, onSessionClick, onPathClick }: FileViewerProps) {
+export function FileViewer({ file, onSessionClick, onPathClick, onFileClick }: FileViewerProps) {
   if (!file) {
     return (
       <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", flexDirection: "column", gap: "12px" }}>
@@ -174,9 +177,21 @@ export function FileViewer({ file, onSessionClick, onPathClick }: FileViewerProp
           ) : file.encoding === "binary" ? (
             <div style={{ padding: "24px 16px" }}><BinaryViewer /></div>
           ) : ext === ".md" || ext === ".markdown" ? (
-            <div style={{ padding: "24px 16px" }}><MarkdownViewer content={file.content} /></div>
+            <div style={{ padding: "24px 16px" }}>
+              <MarkdownViewer
+                content={file.content}
+                currentPath={file.path}
+                onFileClick={onFileClick}
+                targetLine={file.targetLine}
+              />
+            </div>
           ) : (
-            <CodeViewer content={file.content} ext={ext} />
+            <CodeViewer
+              content={file.content}
+              ext={ext}
+              targetLine={file.targetLine}
+              targetColumn={file.targetColumn}
+            />
           )}
         </div>
       </div>

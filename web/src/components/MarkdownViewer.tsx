@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
@@ -26,9 +26,90 @@ const monoFontFamily = [
   'monospace',
 ].join(", ");
 
-export function MarkdownViewer({ content }: { content: string }) {
+function normalizePosixPath(input: string): string {
+  const absolute = input.startsWith("/");
+  const parts = input.split("/").filter((part) => part && part !== ".");
+  const normalized: string[] = [];
+  for (const part of parts) {
+    if (part === "..") {
+      normalized.pop();
+      continue;
+    }
+    normalized.push(part);
+  }
+  return absolute ? `/${normalized.join("/")}` : normalized.join("/");
+}
+
+function dirnamePosix(input: string): string {
+  const normalized = normalizePosixPath(input.replace(/\\/g, "/"));
+  if (!normalized || !normalized.includes("/")) return ".";
+  const parts = normalized.split("/");
+  parts.pop();
+  return parts.join("/") || ".";
+}
+
+function resolveMarkdownHref(currentPath: string, href: string): string {
+  const trimmed = href.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("file://")) {
+    return decodeURIComponent(trimmed.slice("file://".length));
+  }
+  if (trimmed.startsWith("/")) {
+    return trimmed.replace(/^\/+/, "");
+  }
+  const baseDir = currentPath ? dirnamePosix(currentPath) : ".";
+  return normalizePosixPath(`${baseDir}/${trimmed}`);
+}
+
+function isExternalHref(href: string): boolean {
+  return /^(https?:|mailto:|tel:)/i.test(href);
+}
+
+export function MarkdownViewer({
+  content,
+  currentPath = "",
+  onFileClick,
+  targetLine,
+}: {
+  content: string;
+  currentPath?: string;
+  onFileClick?: (path: string) => void;
+  targetLine?: number;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const sourceLineSelector = useMemo(() => {
+    if (!targetLine || targetLine < 1) return "";
+    return "[data-source-line]";
+  }, [targetLine]);
+
+  useEffect(() => {
+    if (!targetLine || targetLine < 1 || !containerRef.current || !sourceLineSelector) {
+      return;
+    }
+    const elements = Array.from(containerRef.current.querySelectorAll<HTMLElement>(sourceLineSelector));
+    if (elements.length === 0) return;
+    let target: HTMLElement | null = null;
+    for (const el of elements) {
+      const line = Number.parseInt(el.dataset.sourceLine || "", 10);
+      if (!Number.isFinite(line)) continue;
+      if (line <= targetLine) {
+        target = el;
+        continue;
+      }
+      break;
+    }
+    (target || elements[0]).scrollIntoView({ block: "center", behavior: "auto" });
+  }, [content, sourceLineSelector, targetLine]);
+
+  const getSourceLineProps = (node: any): Record<string, string> => {
+    const line = node?.position?.start?.line;
+    if (!Number.isFinite(line)) return {};
+    return { "data-source-line": String(line) };
+  };
+
   return (
     <div
+      ref={containerRef}
       style={{
         padding: "0", // 移除内层 padding，由 FileViewer 统一控制
         color: "var(--text-primary)",
@@ -40,29 +121,59 @@ export function MarkdownViewer({ content }: { content: string }) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeSanitize]}
         components={{
-          h1: (props) => (
-            <h1 style={{ fontSize: "24px", marginTop: 0 }} {...props} />
+          h1: ({ node, ...props }: any) => (
+            <h1 style={{ fontSize: "24px", marginTop: 0 }} {...getSourceLineProps(node)} {...props} />
           ),
-          h2: (props) => (
-            <h2 style={{ fontSize: "20px" }} {...props} />
+          h2: ({ node, ...props }: any) => (
+            <h2 style={{ fontSize: "20px" }} {...getSourceLineProps(node)} {...props} />
           ),
-          h3: (props) => (
-            <h3 style={{ fontSize: "17px", marginTop: "1.25em" }} {...props} />
+          h3: ({ node, ...props }: any) => (
+            <h3 style={{ fontSize: "17px", marginTop: "1.25em" }} {...getSourceLineProps(node)} {...props} />
           ),
-          p: (props) => (
-            <p style={{ margin: "0 0 1em", whiteSpace: "normal" }} {...props} />
+          p: ({ node, ...props }: any) => (
+            <p style={{ margin: "0 0 1em", whiteSpace: "normal" }} {...getSourceLineProps(node)} {...props} />
           ),
-          ul: (props) => (
-            <ul style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...props} />
+          ul: ({ node, ...props }: any) => (
+            <ul style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...getSourceLineProps(node)} {...props} />
           ),
-          ol: (props) => (
-            <ol style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...props} />
+          ol: ({ node, ...props }: any) => (
+            <ol style={{ margin: "0 0 1em", paddingLeft: "1.4em" }} {...getSourceLineProps(node)} {...props} />
           ),
           li: (props) => (
             <li style={{ margin: "0.2em 0" }} {...props} />
           ),
-          table: (props) => (
+          a: ({ href = "", children, ...props }) => {
+            if (!href || href.startsWith("#") || isExternalHref(href) || !onFileClick) {
+              return (
+                <a
+                  href={href}
+                  style={{ color: "var(--accent-color)" }}
+                  {...props}
+                >
+                  {children}
+                </a>
+              );
+            }
+            const resolvedPath = resolveMarkdownHref(currentPath, href);
+            return (
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (resolvedPath) {
+                    onFileClick(resolvedPath);
+                  }
+                }}
+                style={{ color: "var(--accent-color)", cursor: "pointer" }}
+                {...props}
+              >
+                {children}
+              </a>
+            );
+          },
+          table: ({ node, ...props }: any) => (
             <div
+              {...getSourceLineProps(node)}
               style={{
                 width: "100%",
                 overflowX: "auto",
@@ -122,7 +233,7 @@ export function MarkdownViewer({ content }: { content: string }) {
               {...props}
             />
           ),
-          blockquote: (props) => (
+          blockquote: ({ node, ...props }: any) => (
             <blockquote style={{ 
               borderLeft: "3px solid var(--accent-color)", 
               margin: "1.5em 0", 
@@ -132,7 +243,7 @@ export function MarkdownViewer({ content }: { content: string }) {
               background: "rgba(0,0,0,0.02)",
               padding: "12px 16px",
               borderRadius: "0 8px 8px 0"
-            }} {...props} />
+            }} {...getSourceLineProps(node)} {...props} />
           ),
           code({ className, children, ...props }: any) {
             return (
@@ -152,7 +263,7 @@ export function MarkdownViewer({ content }: { content: string }) {
               </code>
             );
           },
-          pre: ({ children }: any) => {
+          pre: ({ node, children }: any) => {
             const codeElement = React.Children.only(children) as React.ReactElement<any>;
             const className = codeElement?.props?.className || "";
             const rawContent = String(codeElement?.props?.children ?? "").replace(/\n$/, "");
@@ -169,6 +280,7 @@ export function MarkdownViewer({ content }: { content: string }) {
             }
             return (
               <pre
+                {...getSourceLineProps(node)}
                 style={{
                   width: "100%",
                   boxSizing: "border-box",

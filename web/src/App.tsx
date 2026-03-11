@@ -17,7 +17,7 @@ import { BottomSheet } from "./components/BottomSheet";
 
 // 类型定义
 export type FileEntry = { name: string; path: string; is_dir: boolean; };
-export type FilePayload = { name: string; path: string; content: string; encoding: string; truncated: boolean; next_cursor?: number; size: number; ext?: string; mime?: string; root?: string; file_meta?: any[]; };
+export type FilePayload = { name: string; path: string; content: string; encoding: string; truncated: boolean; next_cursor?: number; size: number; ext?: string; mime?: string; root?: string; file_meta?: any[]; targetLine?: number; targetColumn?: number; };
 type SessionMode = "chat" | "plugin" | "skill";
 export type SessionItem = { key?: string; session_key?: string; root_id?: string; name?: string; type?: SessionMode; agent?: string; scope?: string; purpose?: string; closed_at?: string; related_files?: Array<{ path: string; name?: string }>; exchanges?: Array<{ role?: string; content?: string; timestamp?: string }>; pending?: boolean; };
 type Exchange = { role: string; agent?: string; content?: string; timestamp?: string; toolCall?: any; };
@@ -152,6 +152,25 @@ function buildMatchInputFromPath(path: string, query: Record<string, string>): P
 
 function normalizePath(value: string): string {
   return String(value || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function parseFileLocation(path: string): { path: string; targetLine?: number; targetColumn?: number } {
+  const raw = String(path || "");
+  const [base, fragment = ""] = raw.split("#", 2);
+  if (!fragment) {
+    return { path: base };
+  }
+  const match = /^L(\d+)(?:C(\d+))?$/i.exec(fragment.trim());
+  if (!match) {
+    return { path: base };
+  }
+  const targetLine = Number.parseInt(match[1], 10);
+  const targetColumn = match[2] ? Number.parseInt(match[2], 10) : undefined;
+  return {
+    path: base,
+    targetLine: Number.isFinite(targetLine) && targetLine > 0 ? targetLine : undefined,
+    targetColumn: targetColumn && Number.isFinite(targetColumn) && targetColumn > 0 ? targetColumn : undefined,
+  };
 }
 
 function parentDirsOfFile(path: string): string[] {
@@ -601,7 +620,8 @@ export function App() {
 
   const actionHandlers = useMemo(() => ({
     open: async (params: any) => {
-      const path = params.path, root = params.root || currentRootIdRef.current;
+      const parsedLocation = parseFileLocation(String(params.path || ""));
+      const path = parsedLocation.path, root = params.root || currentRootIdRef.current;
       if (!path || !root) return;
       const currentFilePath = fileRef.current?.path || "";
       const currentFileRoot = fileRef.current?.root || currentRootIdRef.current || "";
@@ -715,7 +735,11 @@ export function App() {
         const payload = await res.json();
         const next = normalizeFileResponse(payload);
         if (next.file) {
-          setFile(next.file);
+          setFile({
+            ...next.file,
+            targetLine: parsedLocation.targetLine,
+            targetColumn: parsedLocation.targetColumn,
+          });
         }
         fileCursorRef.current = cursor;
         setSelectedSession(null);
@@ -1291,6 +1315,11 @@ export function App() {
                       const root = file.root || currentRootIdRef.current;
                       if (!root) return;
                       actionHandlers.open_dir({ path: path === "." ? root : path, root });
+                    }}
+                    onFileClick={(path) => {
+                      const root = file.root || currentRootIdRef.current;
+                      if (!root) return;
+                      actionHandlers.open({ path, root });
                     }}
                   />
                 </div>

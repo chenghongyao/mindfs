@@ -373,7 +373,11 @@ export function ActionBar({
                   border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--border-color)",
                   borderRadius: "12px",
                   boxShadow: "0 12px 32px rgba(0,0,0,0.16)",
-                  overflow: "hidden",
+                  overflowX: "hidden",
+                  overflowY: "auto",
+                  maxHeight: isMobile ? "min(55vh, 416px)" : "320px",
+                  WebkitOverflowScrolling: "touch",
+                  scrollbarWidth: "thin",
                   zIndex: 20,
                 }}
               >

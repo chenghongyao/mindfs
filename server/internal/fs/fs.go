@@ -98,10 +98,25 @@ func (r RootInfo) NormalizePath(path string) (string, error) {
 	if path == "" {
 		return "", errors.New("path required")
 	}
-	if filepath.IsAbs(path) {
-		return r.relativeFromAbsolute(path)
+	root, err := r.rootDir()
+	if err != nil {
+		return "", err
 	}
-	resolved, err := r.resolveRelativePath(path)
+	path = strings.SplitN(path, "#", 2)[0]
+	if path == "" {
+		return "", errors.New("path required")
+	}
+	cleanPath := filepath.Clean(path)
+	if filepath.IsAbs(cleanPath) {
+		return r.relativeFromAbsolute(cleanPath)
+	}
+	rootSlash := filepath.ToSlash(root)
+	pathSlash := filepath.ToSlash(cleanPath)
+	rootTrimmed := strings.TrimPrefix(rootSlash, "/")
+	if rootTrimmed != "" && (pathSlash == rootTrimmed || strings.HasPrefix(pathSlash, rootTrimmed+"/")) {
+		return r.relativeFromAbsolute(string(filepath.Separator) + filepath.FromSlash(pathSlash))
+	}
+	resolved, err := r.resolveRelativePath(cleanPath)
 	if err != nil {
 		return "", err
 	}
