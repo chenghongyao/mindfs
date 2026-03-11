@@ -33,7 +33,7 @@ export function SessionList({
   onRestore,
 }: SessionListProps) {
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "transparent" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
       {/* 统一的 Header 边栏 */}
       <div
         style={{
@@ -60,7 +60,7 @@ export function SessionList({
         </h3>
       </div>
 
-      <div style={{ flex: 1, overflow: "auto", padding: "8px" }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "8px" }}>
         {!sessions.length ? (
           <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "12px 8px" }}>
             暂无会话记录

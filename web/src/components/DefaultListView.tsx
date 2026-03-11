@@ -79,7 +79,7 @@ export function DefaultListView({ root, path = "", entries, onItemClick, onPathC
   const inputRef = React.useRef<HTMLInputElement>(null);
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "transparent" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
       <header
         style={{
           height: "36px",
@@ -141,7 +141,7 @@ export function DefaultListView({ root, path = "", entries, onItemClick, onPathC
         </div>
       </header>
 
-      <div style={{ flex: 1, overflow: "auto", padding: "24px 16px" }}>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "24px 16px" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100%" }}>
           {entries.map((entry) => (
             <div

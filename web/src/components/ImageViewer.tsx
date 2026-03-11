@@ -14,9 +14,10 @@ export function ImageViewer({ path, root }: ImageViewerProps) {
       style={{
         padding: "24px",
         display: "flex",
+        flex: 1,
+        minHeight: 0,
         justifyContent: "center",
         alignItems: "center",
-        height: "100%",
       }}
     >
       <img

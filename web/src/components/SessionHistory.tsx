@@ -36,7 +36,8 @@ export function SessionHistory({
   return (
     <div
       style={{
-        height: "100%",
+        flex: 1,
+        minHeight: 0,
         display: "flex",
         flexDirection: "column",
         background: "#fff",
@@ -103,6 +104,7 @@ export function SessionHistory({
       <div
         style={{
           flex: 1,
+          minHeight: 0,
           overflow: "auto",
           padding: "20px",
         }}

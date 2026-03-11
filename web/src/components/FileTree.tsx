@@ -165,11 +165,11 @@ export function FileTree({
   );
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div style={{ height: "36px", padding: "0 16px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center", boxSizing: "border-box", flexShrink: 0 }}>
         <h3 style={{ margin: 0, fontSize: "11px", fontWeight: 600, color: "var(--text-secondary)", letterSpacing: "0.5px", textTransform: "uppercase" }}>Project</h3>
       </div>
-      <div style={{ padding: "8px", flex: 1, overflow: "auto" }}>
+      <div style={{ padding: "8px", flex: 1, minHeight: 0, overflow: "auto" }}>
         {renderEntries(entries, 0, rootId || "")}
       </div>
     </div>

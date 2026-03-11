@@ -6,7 +6,7 @@ type RightSidebarProps = {
 
 export function RightSidebar({ children }: RightSidebarProps) {
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
+    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
       <div
         style={{
           height: "36px",
@@ -34,7 +34,7 @@ export function RightSidebar({ children }: RightSidebarProps) {
           会话
         </div>
       </div>
-      <div style={{ flex: 1, overflow: "auto", padding: "12px 12px 16px" }}>{children}</div>
+      <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "12px 12px 16px" }}>{children}</div>
     </div>
   );
 }

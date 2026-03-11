@@ -368,22 +368,19 @@ export function ActionBar({
 
           <div
             style={{
-              background: isMobile ? "#fff" : (isDark ? "rgba(15, 23, 42, 0.95)" : "rgba(255, 255, 255, 0.5)"),
+              background: "var(--panel-bg)",
               border: isFocused
                 ? "1px solid var(--accent-color)"
-                : (isDark ? "1px solid rgba(255, 255, 255, 0.1)" : "1px solid rgba(0, 0, 0, 0.15)"),
+                : "1px solid var(--panel-border)",
               borderRadius: isMobile ? "10px" : "12px",
               boxShadow: isMobile
                 ? "none"
-                : (isFocused
-                    ? (isDark ? "0 0 0 3px rgba(59, 130, 246, 0.2)" : "0 4px 24px rgba(37, 99, 235, 0.1)")
-                    : "0 4px 12px rgba(0,0,0,0.02)"),
+                : (isFocused ? "var(--panel-focus-shadow)" : "var(--panel-shadow)"),
               display: "flex",
               alignItems: "center",
               position: "relative",
               transition: isDragging ? "none" : "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
               minHeight: `${editorMinHeight}px`,
-              backdropFilter: isMobile ? "none" : "blur(8px)",
             }}
           >
             <TokenEditor
@@ -412,8 +409,8 @@ export function ActionBar({
                   left: "8px",
                   right: "8px",
                   bottom: "calc(100% + 8px)",
-                  background: isDark ? "rgba(15, 23, 42, 0.98)" : "#fff",
-                  border: isDark ? "1px solid rgba(255,255,255,0.1)" : "1px solid var(--border-color)",
+                  background: "var(--menu-bg)",
+                  border: "1px solid var(--menu-border)",
                   borderRadius: "12px",
                   boxShadow: "0 12px 32px rgba(0,0,0,0.16)",
                   overflowX: "hidden",
@@ -441,10 +438,8 @@ export function ActionBar({
                       width: "100%",
                       padding: "10px 12px",
                       border: "none",
-                      borderTop: index === 0 ? "none" : (isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid rgba(15,23,42,0.06)"),
-                      background: index === activeCandidateIndex
-                        ? (isDark ? "rgba(59,130,246,0.16)" : "rgba(59,130,246,0.08)")
-                        : "transparent",
+                      borderTop: index === 0 ? "none" : "1px solid var(--menu-divider)",
+                      background: index === activeCandidateIndex ? "var(--menu-active-bg)" : "transparent",
                       color: "var(--text-primary)",
                       cursor: "pointer",
                       textAlign: "left",

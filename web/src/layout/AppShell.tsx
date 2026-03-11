@@ -133,20 +133,21 @@ export function AppShell({
     background: "var(--sidebar-bg)",
     boxShadow: side === 'left' ? "4px 0 24px rgba(0,0,0,0.15)" : "-4px 0 24px rgba(0,0,0,0.15)",
     transform: (side === 'left' ? (leftOpen ? "translateX(0)" : "translateX(-100%)") : (rightOpen ? "translateX(0)" : "translateX(100%)")),
-    transition: "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+    transition: "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)",
     display: "flex",
     flexDirection: "column",
+    willChange: "transform",
   });
 
   const overlayStyle: React.CSSProperties = {
     position: "fixed",
     inset: 0,
     background: "rgba(0,0,0,0.3)",
-    backdropFilter: "blur(4px)",
     zIndex: 1500,
     opacity: (isMobile && (leftOpen || rightOpen)) ? 1 : 0,
     pointerEvents: (isMobile && (leftOpen || rightOpen)) ? "auto" : "none",
-    transition: "opacity 0.3s ease",
+    transition: "opacity 0.18s ease",
+    willChange: "opacity",
   };
 
   return (

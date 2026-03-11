@@ -69,7 +69,6 @@ export function CodeViewer({ content, ext, targetLine }: { content: string; ext?
         lineHeight: "20px",
         color: "var(--text-primary)",
         background: "transparent",
-        minHeight: "100%",
       }}
     >
       {/* 行号列 */}

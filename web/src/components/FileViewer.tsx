@@ -78,7 +78,7 @@ function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string;
 export function FileViewer({ file, onSessionClick, onPathClick, onFileClick }: FileViewerProps) {
   if (!file) {
     return (
-      <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", flexDirection: "column", gap: "12px" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", flexDirection: "column", gap: "12px" }}>
         <div style={{ fontSize: "48px", opacity: 0.2 }}>📄</div>
         <p>Select a file to preview</p>
       </div>
