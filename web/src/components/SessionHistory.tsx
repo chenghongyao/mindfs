@@ -20,7 +20,7 @@ type SessionHistoryProps = {
 const typeLabels: Record<string, string> = {
   chat: "对话",
   plugin: "视图插件",
-  skill: "技能执行",
+  skill: "对话",
 };
 
 export function SessionHistory({
@@ -54,7 +54,7 @@ export function SessionHistory({
         }}
       >
         <span style={{ fontSize: "20px" }}>
-          {session.type === "chat" ? "💬" : session.type === "skill" ? "⚡" : "🧩"}
+          {session.type === "plugin" ? "🧩" : "💬"}
         </span>
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: "16px", fontWeight: 600 }}>

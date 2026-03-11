@@ -11,7 +11,7 @@ import TokenEditor, {
 type SessionInfo = {
   key: string;
   name: string;
-  type: "chat" | "plugin" | "skill";
+  type: "chat" | "plugin";
   agent: string;
   pending?: boolean;
 };
@@ -32,7 +32,6 @@ type ActionBarProps = {
 const modePlaceholders: Record<SessionMode, string> = {
   chat: "给 agent 发消息...",
   plugin: "描述要生成的视图插件...",
-  skill: "执行技能...",
 };
 
 const MOBILE_BREAKPOINT = 768;
@@ -93,12 +92,7 @@ export function ActionBar({
 
   useEffect(() => {
     if (currentSession) {
-      const nextMode =
-        currentSession.type === "plugin"
-          ? "plugin"
-          : currentSession.type === "skill"
-          ? "skill"
-          : "chat";
+      const nextMode = currentSession.type === "plugin" ? "plugin" : "chat";
       setMode(nextMode);
       setAgent(currentSession.agent);
     }

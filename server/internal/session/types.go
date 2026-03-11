@@ -6,9 +6,8 @@ import (
 )
 
 const (
-	TypeChat  = "chat"
-	TypeView  = "view"
-	TypeSkill = "skill"
+	TypeChat = "chat"
+	TypeView = "view"
 )
 
 type Session struct {

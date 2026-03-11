@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
-export type SessionMode = "chat" | "plugin" | "skill";
+export type SessionMode = "chat" | "plugin";
 
 type ModeSelectorProps = {
   mode: SessionMode;
@@ -12,13 +12,11 @@ type ModeSelectorProps = {
 const modeLabels: Record<SessionMode, string> = {
   chat: "对话",
   plugin: "视图插件",
-  skill: "执行技能",
 };
 
 const modeIcons: Record<SessionMode, string> = {
   chat: "💬",
   plugin: "🧩",
-  skill: "⚡",
 };
 
 export function ModeSelector({
@@ -120,7 +118,7 @@ export function ModeSelector({
           >
             模式
           </div>
-          {(["chat", "plugin", "skill"] as SessionMode[]).map((m) => (
+          {(["chat", "plugin"] as SessionMode[]).map((m) => (
             <button
               key={m}
               type="button"

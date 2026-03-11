@@ -34,12 +34,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/candidates", h.handleCandidates)
 	r.Get("/api/sessions", h.handleSessions)
 	r.Get("/api/sessions/{key}", h.handleSessionGet)
-	r.Post("/api/skills/{id}/execute", h.handleSkillExecute)
 	r.Get("/api/dirs", h.handleDirs)
 	r.Post("/api/dirs", h.handleAddDir)
-
-	// Directory skills API
-	r.Get("/api/dirs/{id}/skills", h.handleDirSkills)
 
 	// Agent status API
 	r.Get("/api/agents", h.handleAgentsList)
@@ -137,33 +133,6 @@ func sessionListResponse(s *session.Session) map[string]any {
 		"updated_at": s.UpdatedAt,
 		"closed_at":  s.ClosedAt,
 	}
-}
-
-func (h *HTTPHandler) handleSkillExecute(w http.ResponseWriter, r *http.Request) {
-	rootID := r.URL.Query().Get("root")
-	skillID := chi.URLParam(r, "id")
-	if strings.TrimSpace(skillID) == "" {
-		respondError(w, http.StatusBadRequest, errInvalidRequest("skill id required"))
-		return
-	}
-	var req struct {
-		Params map[string]any `json:"params"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
-		return
-	}
-	uc := h.service()
-	out, err := uc.ExecuteSkill(r.Context(), usecase.ExecuteSkillInput{
-		RootID:  rootID,
-		SkillID: skillID,
-		Params:  req.Params,
-	})
-	if err != nil {
-		respondError(w, http.StatusInternalServerError, err)
-		return
-	}
-	respondJSON(w, http.StatusOK, out.Result)
 }
 
 func (h *HTTPHandler) handleAgentsList(w http.ResponseWriter, r *http.Request) {
@@ -301,19 +270,6 @@ func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
-}
-
-func (h *HTTPHandler) handleDirSkills(w http.ResponseWriter, r *http.Request) {
-	rootID := chi.URLParam(r, "id")
-	uc := h.service()
-	out, err := uc.ListDirectorySkills(r.Context(), usecase.ListDirectorySkillsInput{
-		RootID: rootID,
-	})
-	if err != nil {
-		respondError(w, http.StatusNotFound, err)
-		return
-	}
-	respondJSON(w, http.StatusOK, out.Skills)
 }
 
 func managedDirResponse(dir fs.RootInfo) map[string]any {

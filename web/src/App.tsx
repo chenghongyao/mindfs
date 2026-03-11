@@ -18,7 +18,7 @@ import { BottomSheet } from "./components/BottomSheet";
 // 类型定义
 export type FileEntry = { name: string; path: string; is_dir: boolean; };
 export type FilePayload = { name: string; path: string; content: string; encoding: string; truncated: boolean; next_cursor?: number; size: number; ext?: string; mime?: string; root?: string; file_meta?: any[]; targetLine?: number; targetColumn?: number; };
-type SessionMode = "chat" | "plugin" | "skill";
+type SessionMode = "chat" | "plugin";
 export type SessionItem = { key?: string; session_key?: string; root_id?: string; name?: string; type?: SessionMode; agent?: string; scope?: string; purpose?: string; closed_at?: string; related_files?: Array<{ path: string; name?: string }>; exchanges?: Array<{ role?: string; content?: string; timestamp?: string }>; pending?: boolean; };
 type Exchange = { role: string; agent?: string; content?: string; timestamp?: string; toolCall?: any; };
 type PendingSend = { rootId: string; mode: SessionMode; agent: string; message: string; timestamp: string; };
@@ -26,7 +26,7 @@ type URLState = { root: string; file: string; cursor: number; pluginQuery: Recor
 const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 
 function normalizeMode(mode: SessionMode | undefined): SessionMode {
-  if (mode === "plugin" || mode === "skill") return mode;
+  if (mode === "plugin") return mode;
   return "chat";
 }
 

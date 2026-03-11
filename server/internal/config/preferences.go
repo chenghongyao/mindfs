@@ -48,9 +48,8 @@ func NewPreferencesStore() (*PreferencesStore, error) {
 func defaultPreferences() *Preferences {
 	return &Preferences{
 		ModeAgents: map[string]string{
-			"chat":  "claude",
-			"view":  "claude",
-			"skill": "claude",
+			"chat": "claude",
+			"view": "claude",
 		},
 	}
 }
