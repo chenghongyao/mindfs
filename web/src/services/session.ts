@@ -318,6 +318,24 @@ class SessionService {
     return true;
   }
 
+  async markSessionReady(rootId: string, sessionKey: string): Promise<boolean> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      return false;
+    }
+    if (!rootId || !sessionKey) {
+      return false;
+    }
+    this.ws.send(JSON.stringify({
+      id: `ready-${Date.now()}`,
+      type: "session.ready",
+      payload: {
+        root_id: rootId,
+        session_key: sessionKey,
+      },
+    }));
+    return true;
+  }
+
   async fetchSessions(rootId: string): Promise<Session[]> {
     try {
       const res = await fetch(

@@ -163,6 +163,7 @@ type SendMessageInput struct {
 	Agent     string
 	Content   string
 	ClientCtx ClientContext
+	OnStart   func()
 	OnUpdate  func(agenttypes.Event)
 }
 
@@ -515,6 +516,9 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	sendLock := getSessionSendLock(in.Key)
 	sendLock.Lock()
 	defer sendLock.Unlock()
+	if in.OnStart != nil {
+		in.OnStart()
+	}
 	manager, err := s.Registry.GetSessionManager(in.RootID)
 	if err != nil {
 		return err
@@ -582,23 +586,21 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	if err := manager.AddExchangeForAgent(ctx, current, "user", in.Content, in.Agent); err != nil {
 		return err
 	}
-	if sendErr != nil {
-		if isCanceledTurnError(sendErr) {
-			return nil
-		}
-		if prober := s.Registry.GetProber(); prober != nil {
+
+	prober := s.Registry.GetProber()
+	if sendErr != nil && !isCanceledTurnError(sendErr) {
+		if prober != nil {
 			prober.ReportFailure(in.Agent, sendErr)
 		}
 		return sendErr
-	}
-	if prober := s.Registry.GetProber(); prober != nil {
+	} else if prober != nil {
 		prober.ReportSuccess(in.Agent)
 	}
+
 	err = s.appendAgentReply(ctx, manager, current, in.Agent, responseText)
 	if err != nil {
 		return err
 	}
-
 	manager.UpdateAgentState(ctx, current, in.Agent, contextLineCount(current.Exchanges))
 	return nil
 }

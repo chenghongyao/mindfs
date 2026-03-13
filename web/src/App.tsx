@@ -493,28 +493,6 @@ export function App() {
     bumpCacheVersion();
   }, [rootSessionKey, bumpCacheVersion]);
 
-  const rollbackInFlightReplyForSession = useCallback((rootID: string, sessionKey: string) => {
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const cached = sessionCacheRef.current[cacheKey];
-    if (!cached) return;
-    const exchanges = Array.isArray((cached as any).exchanges) ? [ ...(((cached as any).exchanges as Exchange[]) || []) ] : [];
-    let lastUserIndex = -1;
-    for (let i = exchanges.length - 1; i >= 0; i--) {
-      if (exchanges[i]?.role === "user") {
-        lastUserIndex = i;
-        break;
-      }
-    }
-    if (lastUserIndex < 0) return;
-    const nextExchanges = exchanges.slice(0, lastUserIndex + 1);
-    sessionCacheRef.current[cacheKey] = {
-      ...(cached as any),
-      exchanges: nextExchanges,
-      updated_at: new Date().toISOString(),
-    } as Session;
-    bumpCacheVersion();
-  }, [rootSessionKey, bumpCacheVersion]);
-
   const normalizeTreeResponse = useCallback((payload: any) => {
     if (payload && payload.entries) return { entries: payload.entries as FileEntry[] };
     return { entries: [] };
@@ -606,6 +584,7 @@ export function App() {
       const fullSession = await request;
       if (fullSession) {
         applySession(fullSession);
+        void sessionService.markSessionReady(targetRoot, key);
       }
     } catch (err) {}
   }, [isMobile, rootSessionKey, bumpCacheVersion, setDrawerOpenForRoot, setDrawerSessionForRoot]);
@@ -996,11 +975,26 @@ export function App() {
         if (!cancelled) { const next = Array.isArray(payload) ? payload : []; setSessions(next); }
       } catch {}
     };
+    const reloadSessionForReplay = async (rootID: string, sessionKey: string) => {
+      if (!rootID || !sessionKey) return;
+      const fullSession = await sessionService.getSession(rootID, sessionKey);
+      if (!fullSession || cancelled) return;
+      const normalized = { ...(fullSession as any), key: sessionKey } as Session;
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      sessionCacheRef.current[cacheKey] = normalized;
+      bumpCacheVersion();
+      if ((selectedSessionRef.current?.key || selectedSessionRef.current?.session_key) === sessionKey) {
+        setSelectedSession((prev) => prev ? ({ ...(prev as any), ...(normalized as any) } as SessionItem) : prev);
+      }
+      if (boundSessionByRootRef.current[rootID] === sessionKey) {
+        setDrawerSessionForRoot(rootID, normalized);
+      }
+      await sessionService.markSessionReady(rootID, sessionKey);
+    };
     const handleSessionStreamDone = (rootID: string, sessionKey: string) => {
       const cacheKey = rootSessionKey(rootID, sessionKey);
       const wasCanceled = !!cancelRequestedBySessionRef.current[cacheKey];
       if (wasCanceled) {
-        rollbackInFlightReplyForSession(rootID, sessionKey);
         delete cancelRequestedBySessionRef.current[cacheKey];
       }
       delete pendingBySessionRef.current[cacheKey];
@@ -1086,6 +1080,8 @@ export function App() {
           }
           break;
         case "message_done":
+          handleSessionStreamDone(activeRoot, streamKey);
+          break;
         case "error":
           handleSessionStreamDone(activeRoot, streamKey);
           break;
@@ -1115,12 +1111,60 @@ export function App() {
     const unsubscribeEvents = sessionService.subscribeEvents((event) => {
       const payload = (event.payload || {}) as any;
       switch (event.type) {
+        case "ws.reconnected":
+        case "ws.connected":
+          if (currentRootIdRef.current) {
+            loadSessions(currentRootIdRef.current);
+            const boundKey = boundSessionByRootRef.current[currentRootIdRef.current] || "";
+            if (boundKey) {
+              void reloadSessionForReplay(currentRootIdRef.current, boundKey);
+            }
+          }
+          break;
         case "session.stream": handleSessionStream(payload); break;
         case "session.done":
-          if (typeof payload?.session_key === "string" && currentRootIdRef.current) {
-            handleSessionStreamDone(currentRootIdRef.current, payload.session_key);
+          if (currentRootIdRef.current) {
+            loadSessions(currentRootIdRef.current);
           }
-          loadSessions(currentRootIdRef.current!);
+          break;
+        case "session.user_message":
+          if (typeof payload?.session_key === "string" && typeof payload?.root_id === "string") {
+            const rootID = payload.root_id;
+            const sessionKey = payload.session_key;
+            const exchange = payload.exchange;
+            const sessionMeta = payload.session;
+            const cacheKey = rootSessionKey(rootID, sessionKey);
+            const cached = sessionCacheRef.current[cacheKey] || ({
+              key: sessionKey,
+              type: sessionMeta?.type || "chat",
+              agent: sessionMeta?.agent || exchange?.agent || "",
+              name: sessionMeta?.name || "新会话",
+              created_at: sessionMeta?.created_at || exchange?.timestamp || new Date().toISOString(),
+              updated_at: sessionMeta?.updated_at || exchange?.timestamp || new Date().toISOString(),
+              exchanges: [],
+            } as any);
+            const prevExchanges = Array.isArray((cached as any).exchanges) ? ((cached as any).exchanges as Exchange[]) : [];
+            const duplicate = prevExchanges.some((item) =>
+              item.role === "user" &&
+              item.content === exchange?.content &&
+              item.timestamp === exchange?.timestamp
+            );
+            sessionCacheRef.current[cacheKey] = {
+              ...(cached as any),
+              ...(sessionMeta || {}),
+              key: sessionKey,
+              agent: sessionMeta?.agent || exchange?.agent || (cached as any).agent || "",
+              exchanges: duplicate ? prevExchanges : [...prevExchanges, {
+                role: "user",
+                agent: exchange?.agent || "",
+                content: exchange?.content || "",
+                timestamp: exchange?.timestamp || new Date().toISOString(),
+              }],
+              updated_at: sessionMeta?.updated_at || exchange?.timestamp || new Date().toISOString(),
+            } as Session;
+            bumpCacheVersion();
+            loadSessions(rootID);
+          }
           break;
         case "file.changed": handleFileChanged(payload); break;
         case "agent.status.changed": setAgentsVersion(v => v + 1); break;
@@ -1128,7 +1172,7 @@ export function App() {
     });
     loadSessions(currentRootId);
     return () => { cancelled = true; unsubscribeEvents(); sessionService.disconnect(); setStatus("Disconnected"); };
-  }, [currentRootId, rootSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, rollbackInFlightReplyForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir]);
+  }, [currentRootId, rootSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir]);
 
   useEffect(() => {
     if (!currentRootId) return;

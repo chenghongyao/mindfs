@@ -106,21 +106,31 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 	}
 	clientID := strings.TrimSpace(r.URL.Query().Get("client_id"))
 	if h.AppContext != nil {
-		h.AppContext.GetSessionStreamHub().BindSessionClient(key, clientID)
+		streamHub := h.AppContext.GetSessionStreamHub()
+		streamHub.BindSessionClient(key, clientID)
 	}
-	respondJSON(w, http.StatusOK, sessionResponse(out))
+	var pendingUser *session.Exchange
+	if h.AppContext != nil {
+		pendingUser = h.AppContext.GetSessionStreamHub().GetPendingUserExchange(key)
+	}
+	respondJSON(w, http.StatusOK, sessionResponse(out, pendingUser))
 }
 
-func sessionResponse(s *session.Session) map[string]any {
+func sessionResponse(s *session.Session, pendingUser *session.Exchange) map[string]any {
 	if s == nil {
 		return map[string]any{}
+	}
+	exchanges := append([]session.Exchange{}, s.Exchanges...)
+	if pendingUser != nil {
+		pendingUser.Seq = len(exchanges) + 1
+		exchanges = append(exchanges, *pendingUser)
 	}
 	return map[string]any{
 		"key":           s.Key,
 		"type":          s.Type,
 		"agent":         session.InferAgentFromSession(s),
 		"name":          s.Name,
-		"exchanges":     s.Exchanges,
+		"exchanges":     exchanges,
 		"related_files": s.RelatedFiles,
 		"created_at":    s.CreatedAt,
 		"updated_at":    s.UpdatedAt,

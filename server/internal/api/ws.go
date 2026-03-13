@@ -117,6 +117,8 @@ func (h *WSHandler) handleWSRequest(ctx context.Context, conn *websocket.Conn, c
 	switch req.Type {
 	case "session.message":
 		go h.handleSessionMessage(ctx, conn, clientID, req)
+	case "session.ready":
+		go h.handleSessionReady(clientID, req)
 	case "session.cancel":
 		h.handleSessionCancel(ctx, conn, clientID, req)
 	default:
@@ -136,8 +138,9 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	}
 
 	uc := &usecase.Service{Registry: h.AppContext}
+	sessionName := ""
 	if key == "" {
-		sessionName := buildSessionNameFromMessage(content)
+		sessionName = buildSessionNameFromMessage(content)
 		created, err := uc.CreateSession(ctx, usecase.CreateSessionInput{
 			RootID: rootID,
 			Input: session.CreateInput{
@@ -170,6 +173,9 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		Agent:     agentName,
 		Content:   content,
 		ClientCtx: clientCtx,
+		OnStart: func() {
+			streamHub.BroadcastSessionUserMessage(rootID, key, sessionType, sessionName, agentName, content, clientID)
+		},
 		OnUpdate: func(update agenttypes.Event) {
 			event := updateToEvent(update)
 			if event == nil {
@@ -186,9 +192,23 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 		}
 		streamHub.BroadcastSessionStream(key, event)
 	}
+	streamHub.ClearSessionPending(key)
 
 	log.Printf("[ws] session.done root=%s session=%s request=%s", rootID, key, req.ID)
 	streamHub.BroadcastSessionDone(key, req.ID)
+}
+
+func (h *WSHandler) handleSessionReady(clientID string, req WSRequest) {
+	if h.AppContext == nil {
+		return
+	}
+	rootID := getString(req.Payload, "root_id")
+	key := getString(req.Payload, "session_key")
+	if rootID == "" || key == "" {
+		return
+	}
+	streamHub := h.AppContext.GetSessionStreamHub()
+	streamHub.ReplayPending(clientID, key)
 }
 
 func (h *WSHandler) handleSessionCancel(ctx context.Context, conn *websocket.Conn, _ string, req WSRequest) {
