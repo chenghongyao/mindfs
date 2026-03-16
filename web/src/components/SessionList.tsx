@@ -1,5 +1,4 @@
 import React from "react";
-import { AgentIcon } from "./AgentIcon";
 
 export type SessionType = "chat" | "plugin";
 
@@ -30,7 +29,6 @@ export function SessionList({
   sessions,
   selectedKey = "",
   onSelect,
-  onRestore,
 }: SessionListProps) {
   return (
     <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
@@ -73,7 +71,6 @@ export function SessionList({
                 session={session}
                 selected={session.key === selectedKey}
                 onSelect={onSelect}
-                onRestore={onRestore}
               />
             ))}
           </div>
@@ -83,10 +80,9 @@ export function SessionList({
   );
 }
 
-function SessionCard({ session, selected, onSelect, onRestore }: { session: SessionItem; selected: boolean; onSelect?: (session: SessionItem) => void; onRestore?: (session: SessionItem) => void }) {
+function SessionCard({ session, selected, onSelect }: { session: SessionItem; selected: boolean; onSelect?: (session: SessionItem) => void }) {
   const isClosed = !!session.closed_at;
   const displayName = session.name || `Session ${session.key.slice(0, 8)}`;
-  const fileCount = session.related_files?.length || 0;
 
   return (
     <button
@@ -101,60 +97,39 @@ function SessionCard({ session, selected, onSelect, onRestore }: { session: Sess
         cursor: "pointer",
         width: "100%",
         display: "flex",
-        flexDirection: "column",
-        gap: "2px",
+        alignItems: "center",
+        gap: "8px",
         transition: "all 0.15s ease",
-        position: "relative"
+        position: "relative",
       }}
       onMouseEnter={(e) => { if(!selected) e.currentTarget.style.background = "rgba(0,0,0,0.03)"; }}
       onMouseLeave={(e) => { if(!selected) e.currentTarget.style.background = "transparent"; }}
     >
-      {/* 第一行：标题 */}
-      <div style={{ 
-        fontSize: "13px", 
-        fontWeight: selected ? 600 : 500, 
+      <span style={{ flexShrink: 0, fontSize: "14px", lineHeight: 1 }}>
+        {typeIcons[session.type]}
+      </span>
+
+      <div style={{
+        minWidth: 0,
+        flex: 1,
+        fontSize: "13px",
+        fontWeight: selected ? 600 : 500,
         color: selected ? "var(--accent-color)" : "var(--text-primary)",
         whiteSpace: "nowrap",
         overflow: "hidden",
         textOverflow: "ellipsis",
-        width: "100%"
       }}>
         {displayName}
       </div>
 
-      {/* 第二行：混合辅助信息 */}
-      <div style={{ 
-        display: "flex", 
-        alignItems: "center", 
-        gap: "4px", 
-        fontSize: "10px", 
+      <span style={{
+        flexShrink: 0,
+        fontSize: "10px",
         color: "var(--text-secondary)",
-        width: "100%",
-        opacity: 0.8
+        opacity: 0.8,
       }}>
-        <span>{typeIcons[session.type]}</span>
-        <AgentIcon agentName={session.agent || ""} style={{ width: "12px", height: "12px", flexShrink: 0 }} />
-        <span>•</span>
-        <span style={{ flexShrink: 0 }}>{formatTime(isClosed && session.closed_at ? session.closed_at : session.updated_at)}</span>
-        
-        {fileCount > 0 && (
-          <>
-            <span>•</span>
-            <span style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-              <span style={{ opacity: 0.7 }}>📎</span>{fileCount}
-            </span>
-          </>
-        )}
-
-        {isClosed && onRestore && (
-          <div 
-            style={{ marginLeft: "auto" }}
-            onClick={(e) => { e.stopPropagation(); onRestore(session); }}
-          >
-            <span style={{ color: "var(--accent-color)", cursor: "pointer", fontWeight: 500 }}>恢复</span>
-          </div>
-        )}
-      </div>
+        {formatTime(isClosed && session.closed_at ? session.closed_at : session.updated_at)}
+      </span>
     </button>
   );
 }
