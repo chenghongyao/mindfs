@@ -41,8 +41,8 @@ export function sortDirectoryEntries(entries: FileEntry[], mode: DirectorySortMo
     }
 
     if (mode === "size-desc" || mode === "size-asc") {
-      const leftSize = left.is_dir ? 0 : left.size || 0;
-      const rightSize = right.is_dir ? 0 : right.size || 0;
+      const leftSize = left.size || 0;
+      const rightSize = right.size || 0;
       const diff = mode === "size-desc" ? rightSize - leftSize : leftSize - rightSize;
       if (diff !== 0) {
         return diff;

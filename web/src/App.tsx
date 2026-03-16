@@ -1347,12 +1347,15 @@ export function App() {
     let cancelled = false;
     fetch("/api/dirs").then(r => r.json()).then(async dirs => {
       if (cancelled || !dirs.length) return;
+      const dirByID = new Map<string, any>(dirs.map((dir: any) => [dir.id, dir]));
       const ids = dirs.map((d: any) => d.id);
       managedRootIdsRef.current = new Set(ids); setManagedRootIds(ids);
       setRootEntries(ids.map((id: string) => ({
-        name: id.split("/").filter(Boolean).pop() || id,
+        name: dirByID.get(id)?.display_name || id.split("/").filter(Boolean).pop() || id,
         path: id,
         is_dir: true,
+        size: typeof dirByID.get(id)?.size === "number" ? dirByID.get(id).size : undefined,
+        mtime: typeof dirByID.get(id)?.mtime === "string" ? dirByID.get(id).mtime : undefined,
       })));
       const urlState = readURLState();
       const preferredRoot = urlState.root && ids.includes(urlState.root) ? urlState.root : ids[0];

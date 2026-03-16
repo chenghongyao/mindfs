@@ -455,12 +455,17 @@ func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
 }
 
 func managedDirResponse(dir fs.RootInfo) map[string]any {
-	return map[string]any{
+	resp := map[string]any{
 		"id":           dir.ID,
 		"display_name": dir.Name,
 		"created_at":   dir.CreatedAt,
 		"updated_at":   dir.UpdatedAt,
 	}
+	if info, err := dir.StatRoot(); err == nil {
+		resp["size"] = info.Size()
+		resp["mtime"] = info.ModTime().UTC().Format(time.RFC3339Nano)
+	}
+	return resp
 }
 
 const indexHTML = `<!doctype html>

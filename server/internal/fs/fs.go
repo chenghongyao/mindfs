@@ -131,6 +131,21 @@ func (r RootInfo) MetaDir() string {
 	return filepath.Join(rootAbs, metaDirName)
 }
 
+func (r RootInfo) StatRoot() (os.FileInfo, error) {
+	rootAbs, err := r.rootDir()
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(rootAbs)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, errors.New("root is not a directory")
+	}
+	return info, nil
+}
+
 func (r RootInfo) EnsureMetaDir() (string, error) {
 	metaDir := r.MetaDir()
 	if metaDir == "" {
