@@ -32,7 +32,52 @@ type URLState = { root: string; file: string; session: string; cursor: number; p
 const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 const TREE_SORT_STORAGE_KEY = "mindfs-tree-sort-mode";
 const DIRECTORY_SORT_OVERRIDES_STORAGE_KEY = "mindfs-directory-sort-overrides";
+const FILE_SCROLL_STORAGE_KEY = "mindfs-file-scroll-positions";
 const READ_FILE_TOKEN_PATTERN = /\[read file:\s*[^\]]+\]/i;
+
+function buildFileScrollKey(rootId: string | null | undefined, path: string | null | undefined): string {
+  if (!rootId || !path) {
+    return "";
+  }
+  return `${rootId}::${path}`;
+}
+
+function loadPersistedFileScrollPositions(): Record<string, number> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const raw = window.localStorage.getItem(FILE_SCROLL_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    const next: Record<string, number> = {};
+    Object.entries(parsed).forEach(([key, value]) => {
+      const scrollTop = Number(value);
+      if (!key || !Number.isFinite(scrollTop) || scrollTop < 0) {
+        return;
+      }
+      next[key] = scrollTop;
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function persistFileScrollPositions(positions: Record<string, number>): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(FILE_SCROLL_STORAGE_KEY, JSON.stringify(positions));
+  } catch {
+  }
+}
 
 function normalizeMode(mode: SessionMode | undefined): SessionMode {
   if (mode === "plugin") return mode;
@@ -251,6 +296,7 @@ export function App() {
   const drawerSessionByRootRef = useRef<Record<string, Session | null>>({});
   const drawerOpenByRootRef = useRef<Record<string, boolean>>({});
   const fileCursorRef = useRef<number>(0);
+  const fileScrollPositionsRef = useRef<Record<string, number>>(loadPersistedFileScrollPositions());
   const lastPluginResetFileKeyRef = useRef<string>("");
   const pluginBypassRef = useRef<boolean>(false);
   const fileOpenRequestRef = useRef(0);
@@ -862,6 +908,16 @@ export function App() {
     setInteractionMode("main"); setDrawerOpenForRoot(rootID, false);
   }, [setBoundSessionForRoot, setDrawerOpenForRoot, setDrawerSessionForRoot]);
 
+  const rememberCurrentFileScroll = useCallback(() => {
+    const currentFile = fileRef.current;
+    const key = buildFileScrollKey(currentFile?.root || currentRootIdRef.current, currentFile?.path);
+    if (!key) return;
+    if (!(key in fileScrollPositionsRef.current)) {
+      fileScrollPositionsRef.current[key] = 0;
+      persistFileScrollPositions(fileScrollPositionsRef.current);
+    }
+  }, []);
+
   const actionHandlers = useMemo(() => ({
     open: async (params: any) => {
       const requestId = ++fileOpenRequestRef.current;
@@ -869,15 +925,18 @@ export function App() {
       const parsedLocation = parseFileLocation(String(params.path || ""));
       const path = parsedLocation.path, root = params.root || currentRootIdRef.current;
       if (!path || !root) return;
+      rememberCurrentFileScroll();
       const currentFilePath = fileRef.current?.path || "";
       const currentFileRoot = fileRef.current?.root || currentRootIdRef.current || "";
       const isFileSwitch = currentFilePath !== String(path) || currentFileRoot !== String(root);
       if (isFileSwitch) {
         pluginBypassRef.current = false;
         setPluginBypass(false);
+        // Only tear down the current file view when switching to a different file/root.
+        // Reopening the same file (for example from session view back to file view) should
+        // preserve the existing scroll position and DOM state until fresh content arrives.
+        setFile(null);
       }
-      // Tear down previous renderer state first to avoid stale plugin overlay blocking UI.
-      setFile(null);
       if (currentRootIdRef.current !== root) {
         setCurrentRootId(root);
       }
@@ -1037,7 +1096,7 @@ export function App() {
       if (isActuallyRoot) { setCurrentRootId(path); setExpanded((prev) => Array.from(new Set([...prev, path]))); } else { setExpanded((prev) => Array.from(new Set([...prev, expandedKey]))); }
       await loadDirectoryView(path);
     }
-  }), [isMobile, normalizeTreeResponse, setDrawerOpenForRoot, replaceURLState]);
+  }), [isMobile, normalizeTreeResponse, setDrawerOpenForRoot, replaceURLState, rememberCurrentFileScroll]);
   const actionHandlersRef = useRef(actionHandlers);
   useEffect(() => {
     actionHandlersRef.current = actionHandlers;
@@ -1155,6 +1214,46 @@ export function App() {
     }),
     [actionHandlers, sessions, handleSelectSession, replaceURLState],
   );
+
+  const handleFileViewerSessionClick = useCallback((sessionKey: string) => {
+    if (!sessionKey || !file) return;
+    const root = file.root || currentRootIdRef.current;
+    if (!root) return;
+    const matched = sessions.find((item) => {
+      const key = item.key || item.session_key;
+      return key === sessionKey;
+    });
+    if (matched) {
+      handleSelectSession(matched);
+      return;
+    }
+    handleSelectSession({
+      key: sessionKey,
+      session_key: sessionKey,
+      root_id: root,
+    });
+  }, [file, sessions, handleSelectSession]);
+
+  const handleFileViewerPathClick = useCallback((path: string) => {
+    if (!file) return;
+    const root = file.root || currentRootIdRef.current;
+    if (!root) return;
+    actionHandlers.open_dir({ path: path === "." ? root : path, root });
+  }, [file, actionHandlers]);
+
+  const handleFileViewerFileClick = useCallback((path: string) => {
+    if (!file) return;
+    const root = file.root || currentRootIdRef.current;
+    if (!root) return;
+    actionHandlers.open({ path, root });
+  }, [file, actionHandlers]);
+
+  const handleDirectoryPathClick = useCallback((path: string) => {
+    const root = currentRootIdRef.current;
+    if (!root) return;
+    actionHandlers.open_dir({ path: path === "." ? root : path, root });
+  }, [actionHandlers]);
+
 
   useEffect(() => {
     if (!currentRootId) return;
@@ -1573,6 +1672,120 @@ export function App() {
     actionHandlers.open({ path, root });
   }, [actionHandlers]);
 
+  const currentFileScrollKey = buildFileScrollKey(file?.root || currentRootId, file?.path);
+  const sessionView = (
+    <SessionViewer
+      session={selectedSessionSnapshot}
+      rootId={selectedSession?.root_id || currentRootId}
+      onFileClick={handleSelectedSessionFileClick}
+    />
+  );
+
+  let workspaceView: React.ReactNode;
+  if (file) {
+    if (pluginRender && pluginRender.output) {
+      workspaceView = (
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          <div style={{ height: "36px", borderBottom: "1px solid var(--border-color)", padding: "0 12px", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span>🧩</span>
+              <span>{pluginRender.plugin.name}</span>
+              {pluginLoading ? <span style={{ opacity: 0.7 }}>加载中...</span> : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => { void switchToRawFileView(); }}
+              style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+            >
+              原始文件
+            </button>
+          </div>
+          <div className="plugin-shadcn-sandbox" style={{ ...pluginThemeVars, flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+            <Renderer
+              key={pluginRendererKey}
+              tree={pluginRender.output.tree as any}
+              initialState={(pluginRender.output.data || {}) as Record<string, unknown>}
+              handlers={pluginHandlers}
+            />
+          </div>
+        </div>
+      );
+    } else {
+      workspaceView = (
+        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+          {pluginBypass && matchedPlugin ? (
+            <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>已切换为原始文件视图（插件：{matchedPlugin.name}）</span>
+              <button
+                type="button"
+                onClick={() => { void switchToPluginView(); }}
+                style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+              >
+                使用插件
+              </button>
+            </div>
+          ) : null}
+          {pluginRender && pluginRender.error ? (
+            <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "#d97706", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>插件 {pluginRender.plugin.name} 执行失败，已回退原始视图</span>
+              <button
+                type="button"
+                onClick={() => setPluginBypass(true)}
+                style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+              >
+                忽略插件
+              </button>
+            </div>
+          ) : null}
+          <FileViewer
+            file={file}
+            isVisible={!selectedSession}
+            initialScrollTop={fileScrollPositionsRef.current[currentFileScrollKey] || 0}
+            onScrollTopChange={(scrollTop) => {
+              if (!currentFileScrollKey) return;
+              fileScrollPositionsRef.current[currentFileScrollKey] = scrollTop;
+              persistFileScrollPositions(fileScrollPositionsRef.current);
+            }}
+            onSessionClick={handleFileViewerSessionClick}
+            onPathClick={handleFileViewerPathClick}
+            onFileClick={handleFileViewerFileClick}
+          />
+        </div>
+      );
+    }
+  } else {
+    workspaceView = (
+      <DefaultListView
+        root={currentRootId || undefined}
+        path={selectedDir || ""}
+        entries={mainEntries}
+        sortMode={currentDirectorySortMode}
+        sortControlValue={currentDirectorySortOverride || "inherit"}
+        onSortModeChange={(nextMode) => {
+          const rootID = currentRootIdRef.current;
+          const nextKey = getDirectorySortKey(rootID, selectedDirRef.current);
+          if (!nextKey) {
+            return;
+          }
+          setDirectorySortOverrides((prev) => {
+            if (nextMode === "inherit") {
+              if (!(nextKey in prev)) {
+                return prev;
+              }
+              const next = { ...prev };
+              delete next[nextKey];
+              return next;
+            }
+            return { ...prev, [nextKey]: nextMode };
+          });
+        }}
+        onUploadFiles={handleTreeUpload}
+        onItemClick={(e) => e.is_dir ? actionHandlers.open_dir({ path: e.path }) : actionHandlers.open({ path: e.path })}
+        onPathClick={handleDirectoryPathClick}
+      />
+    );
+  }
+
   useEffect(() => {
     const body = document.body;
     if (!pluginThemeVars || pluginBypass || !pluginRender?.output) {
@@ -1658,131 +1871,12 @@ export function App() {
             <button onClick={() => setIsRightOpen(!isRightOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isRightOpen && !isMobile ? 0 : 1 }}>🕒</button>
           </div>}
           <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            {selectedSession ? (
-              <SessionViewer
-                session={selectedSessionSnapshot}
-                rootId={selectedSession.root_id || currentRootId}
-                onFileClick={handleSelectedSessionFileClick}
-              />
-            ) : file ? (
-              pluginRender && pluginRender.output ? (
-                <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-                  <div style={{ height: "36px", borderBottom: "1px solid var(--border-color)", padding: "0 12px", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span>🧩</span>
-                      <span>{pluginRender.plugin.name}</span>
-                      {pluginLoading ? <span style={{ opacity: 0.7 }}>加载中...</span> : null}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => { void switchToRawFileView(); }}
-                      style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
-                    >
-                      原始文件
-                    </button>
-                  </div>
-                  <div className="plugin-shadcn-sandbox" style={{ ...pluginThemeVars, flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
-                    <Renderer
-                      key={pluginRendererKey}
-                      tree={pluginRender.output.tree as any}
-                      initialState={(pluginRender.output.data || {}) as Record<string, unknown>}
-                      handlers={pluginHandlers}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-                  {pluginBypass && matchedPlugin ? (
-                    <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>已切换为原始文件视图（插件：{matchedPlugin.name}）</span>
-                      <button
-                        type="button"
-                        onClick={() => { void switchToPluginView(); }}
-                        style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
-                      >
-                        使用插件
-                      </button>
-                    </div>
-                  ) : null}
-                  {pluginRender && pluginRender.error ? (
-                    <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "#d97706", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span>插件 {pluginRender.plugin.name} 执行失败，已回退原始视图</span>
-                      <button
-                        type="button"
-                        onClick={() => setPluginBypass(true)}
-                        style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
-                      >
-                        忽略插件
-                      </button>
-                    </div>
-                  ) : null}
-                  <FileViewer
-                    file={file}
-                    onSessionClick={(sessionKey) => {
-                      if (!sessionKey) return;
-                      const root = file.root || currentRootIdRef.current;
-                      if (!root) return;
-                      const matched = sessions.find((item) => {
-                        const key = item.key || item.session_key;
-                        return key === sessionKey;
-                      });
-                      if (matched) {
-                        handleSelectSession(matched);
-                        return;
-                      }
-                      handleSelectSession({
-                        key: sessionKey,
-                        session_key: sessionKey,
-                        root_id: root,
-                      });
-                    }}
-                    onPathClick={(path) => {
-                      const root = file.root || currentRootIdRef.current;
-                      if (!root) return;
-                      actionHandlers.open_dir({ path: path === "." ? root : path, root });
-                    }}
-                    onFileClick={(path) => {
-                      const root = file.root || currentRootIdRef.current;
-                      if (!root) return;
-                      actionHandlers.open({ path, root });
-                    }}
-                  />
-                </div>
-              )
-            ) : (
-              <DefaultListView
-                root={currentRootId || undefined}
-                path={selectedDir || ""}
-                entries={mainEntries}
-                sortMode={currentDirectorySortMode}
-                sortControlValue={currentDirectorySortOverride || "inherit"}
-                onSortModeChange={(nextMode) => {
-                  const rootID = currentRootIdRef.current;
-                  const nextKey = getDirectorySortKey(rootID, selectedDirRef.current);
-                  if (!nextKey) {
-                    return;
-                  }
-                  setDirectorySortOverrides((prev) => {
-                    if (nextMode === "inherit") {
-                      if (!(nextKey in prev)) {
-                        return prev;
-                      }
-                      const next = { ...prev };
-                      delete next[nextKey];
-                      return next;
-                    }
-                    return { ...prev, [nextKey]: nextMode };
-                  });
-                }}
-                onUploadFiles={handleTreeUpload}
-                onItemClick={(e) => e.is_dir ? actionHandlers.open_dir({ path: e.path }) : actionHandlers.open({ path: e.path })}
-                onPathClick={(path) => {
-                  const root = currentRootIdRef.current;
-                  if (!root) return;
-                  actionHandlers.open_dir({ path: path === "." ? root : path, root });
-                }}
-              />
-            )}
+            <div style={{ display: selectedSession ? "flex" : "none", flex: 1, minHeight: 0 }}>
+              {sessionView}
+            </div>
+            <div style={{ display: selectedSession ? "none" : "flex", flex: 1, minHeight: 0, flexDirection: "column" }}>
+              {workspaceView}
+            </div>
           </div>
         </div>
       }

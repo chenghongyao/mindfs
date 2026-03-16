@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { CodeViewer } from "./CodeViewer";
 import { ImageViewer } from "./ImageViewer";
@@ -39,6 +39,9 @@ type FileViewerProps = {
   onSessionClick?: (sessionKey: string) => void;
   onPathClick?: (path: string) => void;
   onFileClick?: (path: string) => void;
+  initialScrollTop?: number;
+  onScrollTopChange?: (scrollTop: number) => void;
+  isVisible?: boolean;
 };
 
 function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string; onPathClick?: (path: string) => void }) {
@@ -77,11 +80,15 @@ function Breadcrumbs({ root, path, onPathClick }: { root?: string; path: string;
   );
 }
 
-export function FileViewer({ file, onSessionClick, onPathClick, onFileClick }: FileViewerProps) {
+export function FileViewer({ file, onSessionClick, onPathClick, onFileClick, initialScrollTop = 0, onScrollTopChange, isVisible = true }: FileViewerProps) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const restoredScrollKeyRef = useRef("");
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === "undefined") return false;
     return window.innerWidth <= 768;
   });
+
+  const fileScrollKey = file ? `${file.root || ""}::${file.path}` : "";
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -91,6 +98,44 @@ export function FileViewer({ file, onSessionClick, onPathClick, onFileClick }: F
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!isVisible) return;
+    if (!fileScrollKey || !scrollRef.current) return;
+    if (file?.targetLine && file.targetLine > 0) return;
+    const savedTop = typeof initialScrollTop === "number" ? initialScrollTop : 0;
+    if (savedTop <= 0) return;
+    if (restoredScrollKeyRef.current === `${fileScrollKey}:${savedTop}`) return;
+    let cancelled = false;
+    let frame1 = 0;
+    let frame2 = 0;
+    const applyScrollTop = () => {
+      if (cancelled || !scrollRef.current) return;
+      scrollRef.current.scrollTop = savedTop;
+    };
+    frame1 = window.requestAnimationFrame(() => {
+      applyScrollTop();
+      frame2 = window.requestAnimationFrame(() => {
+        applyScrollTop();
+        restoredScrollKeyRef.current = `${fileScrollKey}:${savedTop}`;
+      });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame1);
+      window.cancelAnimationFrame(frame2);
+    };
+  }, [fileScrollKey, file?.targetLine, file?.content, initialScrollTop, isVisible]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node || !fileScrollKey) return;
+    const handleScroll = () => {
+      onScrollTopChange?.(node.scrollTop);
+    };
+    node.addEventListener("scroll", handleScroll, { passive: true });
+    return () => node.removeEventListener("scroll", handleScroll);
+  }, [fileScrollKey, onScrollTopChange]);
 
   if (!file) {
     return (
@@ -220,7 +265,7 @@ export function FileViewer({ file, onSessionClick, onPathClick, onFileClick }: F
         <div style={{ fontSize: "11px", color: "var(--text-secondary)", marginLeft: "6px", flexShrink: 0, opacity: 0.7 }}>{(file.size / 1024).toFixed(1)} KB</div>
       </header>
 
-      <div style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative", WebkitOverflowScrolling: "touch" }}>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflow: "auto", position: "relative", WebkitOverflowScrolling: "touch" }}>
         <div style={{ minWidth: "100%", display: "block", background: "transparent" }}>
           {file.mime?.startsWith("image/") || [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"].includes(ext.toLowerCase()) ? (
             <div style={{ padding: "24px 16px" }}><ImageViewer path={file.path} root={file.root} /></div>
