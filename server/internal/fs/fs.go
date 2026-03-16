@@ -794,3 +794,33 @@ func (r RootInfo) GetFileMeta(relativePath string) ([]FileMetaEntry, error) {
 	}
 	return nil, nil
 }
+
+func (r RootInfo) RemoveSessionFileMeta(sessionKey string) error {
+	if strings.TrimSpace(sessionKey) == "" {
+		return errors.New("session key required")
+	}
+	meta, err := r.LoadFileMeta()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for path, entries := range meta {
+		filtered := entries[:0]
+		for _, entry := range entries {
+			if entry.SourceSession == sessionKey {
+				changed = true
+				continue
+			}
+			filtered = append(filtered, entry)
+		}
+		if len(filtered) == 0 {
+			delete(meta, path)
+			continue
+		}
+		meta[path] = filtered
+	}
+	if !changed {
+		return nil
+	}
+	return r.SaveFileMeta(meta)
+}

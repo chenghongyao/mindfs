@@ -691,6 +691,50 @@ export function App() {
     } catch (err) {}
   }, [isMobile, rootSessionKey, bumpCacheVersion, setDrawerOpenForRoot, setDrawerSessionForRoot, replaceURLState]);
 
+  const handleDeleteSession = useCallback(async (session: SessionItem) => {
+    const sessionKey = session?.key || session?.session_key;
+    const rootID = (session?.root_id as string | undefined) || currentRootIdRef.current;
+    if (!rootID || !sessionKey) return;
+
+    const deleted = await sessionService.deleteSession(rootID, sessionKey);
+    if (!deleted) {
+      reportError("session.delete_failed", "删除会话失败");
+      return;
+    }
+
+    setSessions((prev) => prev.filter((item) => (item.key || item.session_key) !== sessionKey));
+
+    const cacheKey = rootSessionKey(rootID, sessionKey);
+    delete sessionCacheRef.current[cacheKey];
+    delete loadedSessionRef.current[cacheKey];
+    delete loadingSessionRef.current[cacheKey];
+    delete pendingBySessionRef.current[cacheKey];
+    delete cancelRequestedBySessionRef.current[cacheKey];
+
+    if (boundSessionByRootRef.current[rootID] === sessionKey) {
+      setBoundSessionForRoot(rootID, null);
+    }
+    if (drawerSessionByRootRef.current[rootID]?.key === sessionKey) {
+      setDrawerSessionForRoot(rootID, null);
+      setDrawerOpenForRoot(rootID, false);
+    }
+
+    const selectedKey = selectedSessionRef.current?.key || selectedSessionRef.current?.session_key;
+    const selectedRoot = (selectedSessionRef.current?.root_id as string | undefined) || currentRootIdRef.current;
+    if (selectedKey === sessionKey && selectedRoot === rootID) {
+      setSelectedSession(null);
+      replaceURLState({
+        root: rootID,
+        file: fileRef.current?.root === rootID ? fileRef.current.path : "",
+        session: "",
+        cursor: fileCursorRef.current || 0,
+        pluginQuery: fileRef.current?.root === rootID ? pluginQuery : {},
+      });
+    }
+
+    bumpCacheVersion();
+  }, [bumpCacheVersion, pluginQuery, replaceURLState, rootSessionKey, setBoundSessionForRoot, setDrawerOpenForRoot, setDrawerSessionForRoot]);
+
   useEffect(() => {
     handleSelectSessionRef.current = handleSelectSession;
   }, [handleSelectSession]);
@@ -1580,7 +1624,7 @@ export function App() {
       leftOpen={isLeftOpen} rightOpen={isRightOpen}
       onCloseLeft={() => setIsLeftOpen(false)} onCloseRight={() => setIsRightOpen(false)}
       sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} onSortModeChange={setTreeSortMode} selectedDir={selectedDir} selectedPath={file?.path} rootId={currentRootId} managedRoots={managedRootIds} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true})} />}
-      rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} />}
+      rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} onDelete={handleDeleteSession} />}
       main={
         <div style={{ width: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
           {!isMobile && <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>

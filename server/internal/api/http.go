@@ -44,6 +44,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/candidates", h.handleCandidates)
 	r.Get("/api/sessions", h.handleSessions)
 	r.Get("/api/sessions/{key}", h.handleSessionGet)
+	r.Delete("/api/sessions/{key}", h.handleSessionDelete)
 	r.Get("/api/dirs", h.handleDirs)
 	r.Post("/api/dirs", h.handleAddDir)
 
@@ -117,6 +118,24 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 		pendingUser = h.AppContext.GetSessionStreamHub().GetPendingUserExchange(key)
 	}
 	respondJSON(w, http.StatusOK, sessionResponse(out, pendingUser))
+}
+
+func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
+	rootID := r.URL.Query().Get("root")
+	key := chi.URLParam(r, "key")
+	if strings.TrimSpace(key) == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
+		return
+	}
+	uc := h.service()
+	if err := uc.DeleteSession(r.Context(), usecase.DeleteSessionInput{
+		RootID: rootID,
+		Key:    key,
+	}); err != nil {
+		respondError(w, http.StatusNotFound, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func sessionResponse(s *session.Session, pendingUser *session.Exchange) map[string]any {

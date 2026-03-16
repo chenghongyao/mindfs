@@ -109,6 +109,33 @@ func (s *Service) CloseSession(ctx context.Context, in CloseSessionInput) (*sess
 	return closed, nil
 }
 
+type DeleteSessionInput struct {
+	RootID string
+	Key    string
+}
+
+func (s *Service) DeleteSession(ctx context.Context, in DeleteSessionInput) error {
+	if err := s.ensureRegistry(); err != nil {
+		return err
+	}
+	root, err := s.Registry.GetRoot(in.RootID)
+	if err != nil {
+		return err
+	}
+	manager, err := s.Registry.GetSessionManager(in.RootID)
+	if err != nil {
+		return err
+	}
+	if err := manager.Delete(ctx, in.Key); err != nil {
+		return err
+	}
+	if err := root.RemoveSessionFileMeta(in.Key); err != nil {
+		return err
+	}
+	s.Registry.ReleaseFileWatcher(in.RootID, in.Key)
+	return nil
+}
+
 type BuildPromptInput struct {
 	Session       *session.Session
 	Manager       *session.Manager

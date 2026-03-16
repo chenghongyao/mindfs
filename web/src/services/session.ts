@@ -371,6 +371,23 @@ class SessionService {
       return null;
     }
   }
+
+  async deleteSession(rootId: string, sessionKey: string): Promise<boolean> {
+    try {
+      const params = new URLSearchParams({ root: rootId });
+      const res = await fetch(
+        `/api/sessions/${encodeURIComponent(sessionKey)}?${params.toString()}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        throw new Error("Failed to delete session");
+      }
+      return true;
+    } catch (err) {
+      console.error("[Session] Failed to delete session:", err);
+      return false;
+    }
+  }
 }
 
 export const sessionService = new SessionService();

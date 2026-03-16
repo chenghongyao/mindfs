@@ -26,6 +26,9 @@ const (
 	selectSessionSQL = `
 SELECT key, type, name, related_files_json, created_at, updated_at, closed_at
 FROM sessions`
+	deleteSessionSQL = `
+DELETE FROM sessions
+WHERE key = ?`
 	upsertSessionMetaSQL = `
 INSERT INTO sessions (
 	key, type, name, related_files_json, created_at, updated_at, closed_at
@@ -264,6 +267,12 @@ func (m *Manager) Close(ctx context.Context, key string) (*Session, error) {
 	return m.closeSessionUnsafe(key)
 }
 
+func (m *Manager) Delete(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deleteSessionUnsafe(key)
+}
+
 func (m *Manager) Rename(_ context.Context, key, name string) (*Session, error) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
@@ -301,6 +310,40 @@ func (m *Manager) closeSessionUnsafe(key string) (*Session, error) {
 		return nil, err
 	}
 	return session, nil
+}
+
+func (m *Manager) deleteSessionUnsafe(key string) error {
+	if strings.TrimSpace(key) == "" {
+		return errors.New("session key required")
+	}
+	db, err := m.ensureSessionMetaDBUnsafe()
+	if err != nil {
+		return err
+	}
+	result, err := db.Exec(deleteSessionSQL, key)
+	if err != nil {
+		return err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errSessionNotFound
+	}
+	delete(m.sessions, key)
+	path, err := m.exchangePath(key)
+	if err != nil {
+		return err
+	}
+	metaDir, err := m.root.EnsureMetaDir()
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(metaDir, filepath.FromSlash(path))); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) CheckIdle(ctx context.Context, idleAfter, closeAfter time.Duration) ([]*Session, []*Session, error) {
