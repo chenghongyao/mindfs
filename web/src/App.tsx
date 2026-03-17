@@ -730,6 +730,44 @@ export function App() {
     }
   }, [normalizeTreeResponse]);
 
+  const refreshCurrentFileContent = useCallback(async (rootID: string, changedPath: string) => {
+    const currentFile = fileRef.current;
+    if (!currentFile) return;
+    const currentRoot = currentFile.root || currentRootIdRef.current || "";
+    if (currentRoot !== rootID || currentFile.path !== changedPath) return;
+
+    let readMode: "incremental" | "full" = "incremental";
+    if (!pluginBypassRef.current) {
+      try {
+        const plugin = pluginManagerRef.current.match(rootID, buildMatchInputFromPath(changedPath, pluginQuery));
+        readMode = inferReadModeFromPlugin(plugin);
+      } catch {
+        readMode = "incremental";
+      }
+    }
+
+    try {
+      const next = await fetchFile({
+        rootId: rootID,
+        path: changedPath,
+        readMode,
+        cursor: fileCursorRef.current || 0,
+      });
+      const latestFile = fileRef.current;
+      const latestRoot = latestFile?.root || currentRootIdRef.current || "";
+      if (!next || !latestFile || latestRoot !== rootID || latestFile.path !== changedPath) {
+        return;
+      }
+      setFile({
+        ...next,
+        targetLine: latestFile.targetLine,
+        targetColumn: latestFile.targetColumn,
+      });
+    } catch (err) {
+      console.error("[file.refresh.changed] failed", { rootID, changedPath, err });
+    }
+  }, [pluginQuery]);
+
   const handleTreeUpload = useCallback(async (files: File[]) => {
     const rootID = currentRootIdRef.current;
     if (!rootID || files.length === 0) return;
@@ -1471,6 +1509,7 @@ export function App() {
       const changedPath = typeof payload?.path === "string" ? payload.path : "";
       if (!rootID || !changedPath) return;
       invalidateFileCache(rootID, changedPath);
+      void refreshCurrentFileContent(rootID, changedPath);
       const parentDir = dirname(changedPath);
       const currentDir = currentDirAPI(rootID);
       const syncMain = rootID === currentRootIdRef.current && parentDir === currentDir;
@@ -1576,7 +1615,7 @@ export function App() {
     });
     loadSessions(currentRootId);
     return () => { cancelled = true; unsubscribeEvents(); sessionService.disconnect(); setStatus("Disconnected"); };
-  }, [currentRootId, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir]);
+  }, [currentRootId, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir, refreshCurrentFileContent]);
 
   useEffect(() => {
     if (!currentRootId) return;
