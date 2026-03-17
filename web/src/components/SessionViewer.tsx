@@ -224,18 +224,19 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
     const time = formatTime(item.timestamp);
     const uploadAttachments = isUser ? extractUploadAttachments(item.content || "") : [];
     const imageAttachments = uploadAttachments.filter((attachment) => attachment.isImage);
-    const fileAttachments = uploadAttachments.filter((attachment) => !attachment.isImage);
     const displayContent = isUser ? stripImageAttachmentTokens(item.content || "") : (item.content || "");
     const userMessageWidth = imageAttachments.length > 0 ? "min(320px, 100%)" : "auto";
-    const hasRichUserAttachments = imageAttachments.length > 0 || fileAttachments.length > 0;
+    const hasRichUserAttachments = imageAttachments.length > 0;
     return (
-      <div key={idx} style={{ alignSelf: isUser ? "flex-end" : "flex-start", width: isUser ? userMessageWidth : "100%", maxWidth: isUser ? "80%" : "100%", position: "relative", display: 'flex', flexDirection: 'column' }}>
+      <div key={idx} style={{ alignSelf: isUser ? "flex-end" : "flex-start", width: isUser ? userMessageWidth : "100%", maxWidth: isUser ? "80%" : "100%", minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
         {isUser ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: '6px', width: userMessageWidth }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", width: userMessageWidth, maxWidth: "100%", minWidth: 0 }}>
             {hasRichUserAttachments ? (
               <div
                 style={{
                   width: "100%",
+                  maxWidth: "100%",
+                  minWidth: 0,
                   padding: "8px",
                   borderRadius: "18px 18px 4px 18px",
                   background: "rgba(148,163,184,0.14)",
@@ -272,50 +273,22 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
                   </div>
                 ) : null}
                 {displayContent ? (
-                  <div style={{ padding: imageAttachments.length > 0 ? "2px 6px 0" : "6px 8px", color: "var(--text-primary)", fontSize: "14px", lineHeight: "1.5", whiteSpace: "pre-wrap" }}>
+                  <div style={{ padding: imageAttachments.length > 0 ? "2px 6px 0" : "6px 8px", color: "var(--text-primary)", fontSize: "14px", lineHeight: "1.5", whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                     <InlineTokenText content={displayContent} isDark={false} variant="inverse" />
-                  </div>
-                ) : null}
-                {fileAttachments.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", width: "100%" }}>
-                    {fileAttachments.map((attachment) => (
-                      <button
-                        key={attachment.path}
-                        type="button"
-                        onClick={() => onFileClickRef.current?.(attachment.path)}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                          width: "100%",
-                          padding: "8px 10px",
-                          borderRadius: "12px",
-                          border: "none",
-                          background: "rgba(255,255,255,0.46)",
-                          color: "var(--text-primary)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                        }}
-                        title={attachment.path}
-                      >
-                        <span style={{ fontSize: "14px" }}>📎</span>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{attachment.name}</span>
-                      </button>
-                    ))}
                   </div>
                 ) : null}
               </div>
             ) : null}
             {!hasRichUserAttachments && displayContent ? (
-              <div style={{ padding: "10px 16px", borderRadius: "18px 18px 4px 18px", background: "rgba(148,163,184,0.14)", color: "var(--text-primary)", fontSize: "14px", lineHeight: "1.5", boxShadow: "none", whiteSpace: "pre-wrap", alignSelf: "flex-end" }}>
+              <div style={{ padding: "10px 16px", borderRadius: "18px 18px 4px 18px", background: "rgba(148,163,184,0.14)", color: "var(--text-primary)", fontSize: "14px", lineHeight: "1.5", boxShadow: "none", whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", alignSelf: "flex-end", maxWidth: "100%", minWidth: 0 }}>
                 <InlineTokenText content={displayContent} isDark={false} variant="inverse" />
               </div>
             ) : null}
             <span style={{ fontSize: '10px', color: 'var(--text-secondary)', opacity: 0.5, alignSelf: 'flex-end' }}>{time}</span>
           </div>
         ) : (
-          <div style={{ width: "100%", display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-            <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%" }}>
+          <div style={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+            <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%", minWidth: 0 }}>
               <MarkdownViewer
                 content={normalizeMarkdownContent(item.content || "")}
                 onFileClick={onFileClickRef.current}
@@ -334,7 +307,7 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
   };
 
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
+    <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
       {interactionMode === "drawer" ? null : (
         <header style={{ height: "36px", padding: "0 16px", borderBottom: "1px solid var(--border-color)", display: "flex", alignItems: "center", background: "transparent", boxSizing: "border-box", zIndex: 10, flexShrink: 0 }}>
           <h1 style={{ fontSize: "14px", fontWeight: 600, margin: 0, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</h1>
@@ -342,15 +315,16 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
       )}
 
       {/* 滚动容器 */}
-      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", position: "relative", WebkitOverflowScrolling: "touch" }}>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, minWidth: 0, overflowY: "auto", overflowX: "hidden", position: "relative", WebkitOverflowScrolling: "touch" }}>
         <div style={{ 
           width: "100%",
+          minWidth: 0,
           display: "block", 
           padding: "24px 16px", 
           boxSizing: "border-box",
           overflowX: "hidden",
         }}>
-          <div style={{ width: "100%", margin: "0", display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ width: "100%", minWidth: 0, margin: "0", display: "flex", flexDirection: "column", gap: "16px" }}>
             {timeline.map((item, idx) => renderTimelineItem(item, idx))}
             {(isAwaiting || isStreaming) && (
               <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>

@@ -279,6 +279,8 @@ function useResponsive() {
 
 export function App() {
   const pluginManagerRef = useRef<PluginManager>(new PluginManager());
+  const completionAudioContextRef = useRef<AudioContext | null>(null);
+  const completionAudioUnlockedRef = useRef(false);
   const managedRootIdsRef = useRef<Set<string>>(new Set());
   const expandedRef = useRef<string[]>([]);
   const selectedDirRef = useRef<string | null>(null);
@@ -355,6 +357,81 @@ export function App() {
   const [pluginLoading, setPluginLoading] = useState(false);
   const [pluginBypass, setPluginBypass] = useState(false);
   const [pluginQuery, setPluginQuery] = useState<Record<string, string>>(() => readURLState().pluginQuery);
+
+  const ensureCompletionAudioContext = useCallback((): AudioContext | null => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    const AudioContextCtor = window.AudioContext || (window as typeof window & {
+      webkitAudioContext?: typeof AudioContext;
+    }).webkitAudioContext;
+    if (!AudioContextCtor) {
+      return null;
+    }
+    if (!completionAudioContextRef.current) {
+      completionAudioContextRef.current = new AudioContextCtor();
+    }
+    return completionAudioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const unlockAudio = () => {
+      const audioContext = ensureCompletionAudioContext();
+      if (!audioContext) {
+        return;
+      }
+      if (audioContext.state === "running") {
+        completionAudioUnlockedRef.current = true;
+        return;
+      }
+      void audioContext.resume().then(() => {
+        completionAudioUnlockedRef.current = audioContext.state === "running";
+      }).catch(() => {
+      });
+    };
+    const options: AddEventListenerOptions = { passive: true };
+    window.addEventListener("pointerdown", unlockAudio, options);
+    window.addEventListener("keydown", unlockAudio, options);
+    window.addEventListener("touchstart", unlockAudio, options);
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+      window.removeEventListener("touchstart", unlockAudio);
+    };
+  }, [ensureCompletionAudioContext]);
+
+  const playCompletionSound = useCallback(() => {
+    const audioContext = ensureCompletionAudioContext();
+    if (!audioContext) {
+      return;
+    }
+    try {
+      if (audioContext.state !== "running") {
+        return;
+      }
+      completionAudioUnlockedRef.current = true;
+      const now = audioContext.currentTime;
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, now);
+      oscillator.frequency.exponentialRampToValueAtTime(1174, now + 0.09);
+      gainNode.gain.setValueAtTime(0.0001, now);
+      gainNode.gain.exponentialRampToValueAtTime(0.06, now + 0.01);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.16);
+    } catch (error) {
+      if (completionAudioUnlockedRef.current) {
+        console.error("Failed to play completion sound:", error);
+      }
+    }
+  }, [ensureCompletionAudioContext]);
 
   useEffect(() => { currentRootIdRef.current = currentRootId; }, [currentRootId]);
   useEffect(() => { expandedRef.current = expanded; }, [expanded]);
@@ -872,7 +949,6 @@ export function App() {
     const isBoundInMain = !!selectedSessionRef.current && selectedSessionRef.current.key === sendSessionKey && interactionModeRef.current !== "drawer";
     if (!isBoundInMain) { setInteractionMode("drawer"); setDrawerOpenForRoot(activeRoot, true); }
     setDrawerSessionForRoot(activeRoot, { ...(session as any), pending: true } as Session);
-    setFile(null);
     const explicitFileContext = hasExplicitFileContext(message);
     const context = buildClientContext({
       currentRoot: activeRoot,
@@ -1371,6 +1447,7 @@ export function App() {
           }
           break;
         case "message_done":
+          playCompletionSound();
           handleSessionStreamDone(activeRoot, streamKey);
           break;
         case "error":
@@ -1869,16 +1946,16 @@ export function App() {
       sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} onSortModeChange={setTreeSortMode} selectedDir={selectedDir} selectedPath={file?.path} rootId={currentRootId} managedRoots={managedRootIds} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true})} />}
       rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} onDelete={handleDeleteSession} />}
       main={
-        <div style={{ width: "100%", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", position: "relative" }}>
+        <div style={{ width: "100%", flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
           {!isMobile && <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>
             <button onClick={() => setIsLeftOpen(!isLeftOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isLeftOpen && !isMobile ? 0 : 1 }}>📁</button>
             <button onClick={() => setIsRightOpen(!isRightOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isRightOpen && !isMobile ? 0 : 1 }}>🕒</button>
           </div>}
-          <div style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: selectedSession ? "flex" : "none", flex: 1, minHeight: 0 }}>
+          <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: selectedSession ? "flex" : "none", flex: 1, minHeight: 0, minWidth: 0 }}>
               {sessionView}
             </div>
-            <div style={{ display: selectedSession ? "none" : "flex", flex: 1, minHeight: 0, flexDirection: "column" }}>
+            <div style={{ display: selectedSession ? "none" : "flex", flex: 1, minHeight: 0, minWidth: 0, flexDirection: "column" }}>
               {workspaceView}
             </div>
           </div>

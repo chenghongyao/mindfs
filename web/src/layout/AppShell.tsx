@@ -72,6 +72,7 @@ const footerStyle: React.CSSProperties = {
   background: "var(--content-bg)",
   zIndex: 100,
   paddingBottom: "env(safe-area-inset-bottom, 0px)",
+  minWidth: 0,
 };
 
 export function AppShell({
@@ -170,6 +171,7 @@ export function AppShell({
                 ...mainStyle,
                 flex: 1,
                 minHeight: 0,
+                minWidth: 0,
               }
             : mainStyle
         }
