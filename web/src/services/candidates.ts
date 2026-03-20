@@ -1,3 +1,5 @@
+import { appURL } from "./base";
+
 export type CandidateType = "file" | "skill";
 
 export type CandidateItem = {
@@ -22,7 +24,7 @@ export async function fetchCandidates(params: {
   if (params.type === "skill" && params.agent) {
     search.set("agent", params.agent);
   }
-  const response = await fetch(`/api/candidates?${search.toString()}`, {
+  const response = await fetch(appURL("/api/candidates", search), {
     signal: params.signal,
   });
   if (!response.ok) {

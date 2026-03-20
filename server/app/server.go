@@ -9,10 +9,12 @@ import (
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/api"
 	"mindfs/server/internal/fs"
+	"mindfs/server/internal/relay"
 )
 
 type StartOptions struct {
 	StaticDir string
+	BindCode  string
 }
 
 // Start boots the HTTP/WS server.
@@ -54,6 +56,15 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		Addr:              addr,
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	relayMgr, err := relay.NewManager(addr, opts.BindCode)
+	if err != nil {
+		return err
+	}
+	services.Relay = relayMgr
+	if err := relayMgr.Start(ctx); err != nil {
+		return err
 	}
 
 	go func() {

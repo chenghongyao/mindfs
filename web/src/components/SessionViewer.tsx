@@ -5,6 +5,7 @@ import { ToolCallCard } from "./stream/ToolCallCard";
 import { AgentIcon } from "./AgentIcon";
 import { InlineTokenText } from "./InlineTokenText";
 import { MarkdownViewer } from "./MarkdownViewer";
+import { appURL } from "../services/base";
 import type { ToolCall } from "../services/session";
 
 type RelatedFile = {
@@ -264,7 +265,7 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
                         title={attachment.name}
                       >
                         <img
-                          src={`/api/file?raw=1&root=${encodeURIComponent(rootId || "")}&path=${encodeURIComponent(attachment.path)}`}
+                          src={appURL("/api/file", new URLSearchParams({ raw: "1", root: rootId || "", path: attachment.path }))}
                           alt={attachment.name}
                           style={{ display: "block", width: "100%", maxHeight: "220px", objectFit: "cover", background: "rgba(15,23,42,0.06)" }}
                         />

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { appPath } from '../services/base';
 
 type AgentIconProps = {
   agentName: string;
@@ -6,9 +7,9 @@ type AgentIconProps = {
 };
 
 const ICON_URLS: Record<string, { src: string; alt: string }> = {
-  codex: { src: '/assets/agents/codex.svg', alt: 'Codex' },
-  claude: { src: '/assets/agents/claude.svg', alt: 'Claude' },
-  gemini: { src: '/assets/agents/gemini.svg', alt: 'Gemini' },
+  codex: { src: appPath('/assets/agents/codex.svg'), alt: 'Codex' },
+  claude: { src: appPath('/assets/agents/claude.svg'), alt: 'Claude' },
+  gemini: { src: appPath('/assets/agents/gemini.svg'), alt: 'Gemini' },
 };
 
 const iconCache = new Map<string, string>();

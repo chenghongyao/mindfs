@@ -1,3 +1,5 @@
+import { appURL, wsURL } from "./base";
+
 // Session service for managing agent sessions
 
 export type SessionType = "chat" | "plugin";
@@ -83,8 +85,7 @@ class SessionService {
   }
 
   private buildWSUrl(): string {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    return `${protocol}//${window.location.host}/ws?client_id=${encodeURIComponent(this.clientId)}`;
+    return wsURL("/ws", new URLSearchParams({ client_id: this.clientId }));
   }
 
   connect(rootId: string) {
@@ -339,7 +340,7 @@ class SessionService {
   async fetchSessions(rootId: string): Promise<Session[]> {
     try {
       const res = await fetch(
-        `/api/sessions?root=${encodeURIComponent(rootId)}`
+        appURL("/api/sessions", new URLSearchParams({ root: rootId }))
       );
       if (!res.ok) {
         throw new Error("Failed to fetch sessions");
@@ -359,7 +360,7 @@ class SessionService {
         client_id: this.clientId,
       });
       const res = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionKey)}?${params.toString()}`
+        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}`, params)
       );
       if (!res.ok) {
         throw new Error("Failed to get session");
@@ -376,7 +377,7 @@ class SessionService {
     try {
       const params = new URLSearchParams({ root: rootId });
       const res = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionKey)}?${params.toString()}`,
+        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}`, params),
         { method: "DELETE" }
       );
       if (!res.ok) {

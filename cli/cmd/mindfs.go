@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ func main() {
 	web := flag.Bool("web", true, "start web dev server")
 	webDir := flag.String("web-dir", "web", "web project directory")
 	staticDir := flag.String("static-dir", "web/dist", "directory for serving built web assets on the backend port")
+	bindCode := flag.String("bind-code", "", "relay bind code for activation/binding")
 	flag.Parse()
 
 	root := "."
@@ -39,6 +41,13 @@ func main() {
 
 	if serverRunning(*addr) {
 		fmt.Fprintf(os.Stdout, "server already running on %s, reusing existing process\n", *addr)
+		if strings.TrimSpace(*bindCode) != "" {
+			if err := bindRelay(*addr, *bindCode); err != nil {
+				fmt.Fprintln(os.Stderr, err.Error())
+				os.Exit(1)
+			}
+			fmt.Fprintln(os.Stdout, "relay bind applied")
+		}
 		if err := addManagedDir(*addr, absRoot); err != nil {
 			fmt.Fprintln(os.Stderr, err.Error())
 			os.Exit(1)
@@ -52,7 +61,10 @@ func main() {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- app.Start(ctx, *addr, app.StartOptions{StaticDir: *staticDir})
+		errCh <- app.Start(ctx, *addr, app.StartOptions{
+			StaticDir: *staticDir,
+			BindCode:  *bindCode,
+		})
 	}()
 	if err := waitForServer(*addr, 8*time.Second); err != nil {
 		cancel()
@@ -117,6 +129,34 @@ func addManagedDir(addr, path string) error {
 		return nil
 	}
 	return fmt.Errorf("failed to add managed directory: %s", resp.Status)
+}
+
+func bindRelay(addr, bindCode string) error {
+	url := addrToURL(addr, "/api/relay/bind")
+	body, err := json.Marshal(map[string]any{"bind_code": bindCode})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	message := strings.TrimSpace(string(payload))
+	if message == "" {
+		message = resp.Status
+	}
+	return fmt.Errorf("failed to bind relay: %s", message)
 }
 
 func addrToURL(addr, path string) string {

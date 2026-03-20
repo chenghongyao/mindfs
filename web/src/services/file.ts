@@ -1,3 +1,5 @@
+import { appURL } from "./base";
+
 export type ReadMode = "full" | "incremental";
 
 export type FilePayload = {
@@ -347,7 +349,7 @@ function buildFileURL(rootId: string, path: string, readMode: ReadMode, cursor: 
   if (mtime) {
     queryParams.set("mtime", mtime);
   }
-  return `/api/file?${queryParams.toString()}`;
+  return appURL("/api/file", queryParams);
 }
 
 function createFetchOptions(timeoutMs?: number): {

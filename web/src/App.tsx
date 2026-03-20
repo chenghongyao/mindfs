@@ -12,6 +12,7 @@ import {
 } from "./services/directorySort";
 import { uploadFiles } from "./services/upload";
 import { PluginManager, loadAllPlugins, type PluginInput } from "./plugins/manager";
+import { appPath, appURL } from "./services/base";
 
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
@@ -719,7 +720,7 @@ export function App() {
 
   const refreshTreeDir = useCallback(async (rootID: string, dirPath: string, syncMain: boolean) => {
     try {
-      const res = await fetch(`/api/tree?root=${encodeURIComponent(rootID)}&dir=${encodeURIComponent(dirPath)}`);
+      const res = await fetch(appURL("/api/tree", new URLSearchParams({ root: rootID, dir: dirPath })));
       if (!res.ok) return;
       const payload = await res.json();
       const parsed = normalizeTreeResponse(payload);
@@ -1077,7 +1078,7 @@ export function App() {
         const toLoad = [".", ...dirs];
         for (const dir of toLoad) {
           try {
-            const res = await fetch(`/api/tree?root=${encodeURIComponent(String(root))}&dir=${encodeURIComponent(dir)}`);
+            const res = await fetch(appURL("/api/tree", new URLSearchParams({ root: String(root), dir })));
             if (!res.ok) continue;
             const payload = await res.json();
             const parsed = normalizeTreeResponse(payload);
@@ -1186,7 +1187,7 @@ export function App() {
         setPluginQuery(nextPluginQuery);
         replaceURLState({ root, file: "", session: "", cursor: 0, pluginQuery: nextPluginQuery });
         try {
-          const res = await fetch(`/api/tree?root=${encodeURIComponent(root)}&dir=${encodeURIComponent(apiDir)}`);
+          const res = await fetch(appURL("/api/tree", new URLSearchParams({ root, dir: apiDir })));
           const payload = await res.json();
           const parsed = normalizeTreeResponse(payload);
           setEntriesByPath((prev) => ({ ...prev, [`${root}:${apiDir}`]: parsed.entries }));
@@ -1374,14 +1375,22 @@ export function App() {
     [mainEntries, showHiddenFiles],
   );
 
+  useEffect(() => {
+    if (!currentRootId) return;
+    sessionService.connect(currentRootId);
+    setStatus("Connected");
+    return () => {
+      sessionService.disconnect();
+      setStatus("Disconnected");
+    };
+  }, [currentRootId]);
 
   useEffect(() => {
     if (!currentRootId) return;
-    sessionService.connect(currentRootId); setStatus("Connected");
     let cancelled = false;
     const loadSessions = async (rootID: string) => {
       try {
-        const res = await fetch(`/api/sessions?root=${encodeURIComponent(rootID)}`);
+        const res = await fetch(appURL("/api/sessions", new URLSearchParams({ root: rootID })));
         const payload = await res.json();
         if (!cancelled) { const next = Array.isArray(payload) ? payload : []; setSessions(next); }
       } catch {}
@@ -1620,7 +1629,10 @@ export function App() {
       }
     });
     loadSessions(currentRootId);
-    return () => { cancelled = true; unsubscribeEvents(); sessionService.disconnect(); setStatus("Disconnected"); };
+    return () => {
+      cancelled = true;
+      unsubscribeEvents();
+    };
   }, [currentRootId, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir, refreshCurrentFileContent]);
 
   useEffect(() => {
@@ -1636,7 +1648,7 @@ export function App() {
     }
     didInitRef.current = true;
     let cancelled = false;
-    fetch("/api/dirs").then(r => r.json()).then(async dirs => {
+    fetch(appPath("/api/dirs")).then(r => r.json()).then(async dirs => {
       if (cancelled || !dirs.length) return;
       const dirByID = new Map<string, any>(dirs.map((dir: any) => [dir.id, dir]));
       const ids = dirs.map((d: any) => d.id);

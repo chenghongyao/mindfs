@@ -1,4 +1,5 @@
 import { fetchFile } from "../services/file";
+import { appURL } from "../services/base";
 
 export type MatchRule = {
   ext?: string;
@@ -202,7 +203,7 @@ export async function loadAllPlugins(rootId: string): Promise<ViewPlugin[]> {
   let treeResp: Response;
   try {
     treeResp = await fetch(
-      `/api/tree?root=${encodeURIComponent(rootId)}&dir=${encodeURIComponent(".mindfs/plugins")}`,
+      appURL("/api/tree", new URLSearchParams({ root: rootId, dir: ".mindfs/plugins" })),
     );
   } catch {
     return [];

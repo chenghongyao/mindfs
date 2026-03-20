@@ -1,4 +1,5 @@
 import React, { memo, useMemo } from "react";
+import { appURL } from "../services/base";
 
 type ImageViewerProps = {
   path: string;
@@ -9,8 +10,8 @@ function ImageViewerInner({ path, root }: ImageViewerProps) {
   const url = useMemo(
     () =>
       root
-        ? `/api/file?raw=1&root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}`
-        : `/api/file?raw=1&path=${encodeURIComponent(path)}`,
+        ? appURL("/api/file", new URLSearchParams({ raw: "1", root, path }))
+        : appURL("/api/file", new URLSearchParams({ raw: "1", path })),
     [path, root]
   );
   return (

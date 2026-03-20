@@ -1,3 +1,5 @@
+import { wsURL } from "./base";
+
 export type ConnectionOptions = {
   baseUrl: string;
   token?: string;
@@ -5,15 +7,9 @@ export type ConnectionOptions = {
 
 export function connectToServer({ baseUrl, token }: ConnectionOptions): WebSocket {
   const url = new URL(baseUrl);
-  if (url.protocol === "http:") {
-    url.protocol = "ws:";
-  }
-  if (url.protocol === "https:") {
-    url.protocol = "wss:";
-  }
-  url.pathname = "/ws";
+  const params = new URLSearchParams(url.search);
   if (token) {
-    url.searchParams.set("token", token);
+    params.set("token", token);
   }
-  return new WebSocket(url.toString());
+  return new WebSocket(wsURL("/ws", params));
 }

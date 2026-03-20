@@ -1,3 +1,5 @@
+import { appURL } from "./base";
+
 export type UploadedFile = {
   path: string;
   name: string;
@@ -23,7 +25,7 @@ export async function uploadFiles(params: {
   }
 
   const query = new URLSearchParams({ root: params.rootId });
-  const response = await fetch(`/api/upload?${query.toString()}`, {
+  const response = await fetch(appURL("/api/upload", query), {
     method: "POST",
     body: formData,
   });

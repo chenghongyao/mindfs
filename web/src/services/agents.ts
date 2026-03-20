@@ -1,3 +1,5 @@
+import { appPath } from "./base";
+
 // Agent status service
 
 export type AgentStatus = {
@@ -19,7 +21,7 @@ export async function fetchAgents(force = false): Promise<AgentStatus[]> {
   }
 
   try {
-    const res = await fetch("/api/agents");
+    const res = await fetch(appPath("/api/agents"));
     if (!res.ok) {
       throw new Error("Failed to fetch agents");
     }

@@ -8,6 +8,7 @@ import (
 	"mindfs/server/internal/agent"
 	"mindfs/server/internal/api/usecase"
 	"mindfs/server/internal/fs"
+	"mindfs/server/internal/relay"
 	"mindfs/server/internal/session"
 )
 
@@ -21,6 +22,7 @@ type AppContext struct {
 	Dirs   *fs.Registry
 	Agents *agent.Pool
 	Prober *agent.Prober
+	Relay  *relay.Manager
 
 	mu                  sync.RWMutex
 	roots               map[string]*RootContext // root id -> root context
@@ -146,6 +148,10 @@ func (s *AppContext) GetProber() *agent.Prober {
 
 func (s *AppContext) GetDirRegistry() *fs.Registry {
 	return s.Dirs
+}
+
+func (s *AppContext) GetRelayManager() *relay.Manager {
+	return s.Relay
 }
 
 func (s *AppContext) UpsertRoot(path string) (fs.RootInfo, error) {

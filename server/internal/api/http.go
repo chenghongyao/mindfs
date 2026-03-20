@@ -47,6 +47,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Delete("/api/sessions/{key}", h.handleSessionDelete)
 	r.Get("/api/dirs", h.handleDirs)
 	r.Post("/api/dirs", h.handleAddDir)
+	r.Post("/api/relay/bind", h.handleRelayBind)
 
 	// Agent status API
 	r.Get("/api/agents", h.handleAgentsList)
@@ -471,6 +472,30 @@ func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
+}
+
+func (h *HTTPHandler) handleRelayBind(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		BindCode string `json:"bind_code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json"))
+		return
+	}
+	manager := h.AppContext.GetRelayManager()
+	if manager == nil {
+		respondError(w, http.StatusServiceUnavailable, errServiceUnavailable("relay manager not configured"))
+		return
+	}
+	creds, err := manager.Bind(r.Context(), req.BindCode)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{
+		"node_id":  creds.Relay.NodeID,
+		"endpoint": creds.Relay.Endpoint,
+	})
 }
 
 func managedDirResponse(dir fs.RootInfo) map[string]any {
