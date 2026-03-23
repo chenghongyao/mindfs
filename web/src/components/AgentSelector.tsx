@@ -11,6 +11,71 @@ type AgentSelectorProps = {
   warnUnavailable?: boolean;
 };
 
+function parseAgentErrorMessage(error?: string): string {
+  const raw = String(error || "").trim();
+  if (!raw) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      message?: unknown;
+    };
+    return typeof parsed.message === "string" && parsed.message.trim()
+      ? parsed.message.trim()
+      : raw;
+  } catch {
+    return raw;
+  }
+}
+
+function parseAgentErrorDetails(error?: string): string[] {
+  const raw = String(error || "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      data?: unknown;
+    };
+    if (parsed.data === undefined) {
+      return [];
+    }
+
+    if (Array.isArray(parsed.data)) {
+      return parsed.data.map((item) => String(item)).filter(Boolean);
+    }
+
+    if (parsed.data && typeof parsed.data === "object") {
+      if (Array.isArray((parsed.data as { authMethods?: unknown }).authMethods)) {
+        return ((parsed.data as {
+          authMethods: Array<{ name?: unknown; description?: unknown }>;
+        }).authMethods)
+          .map((item) => {
+            const name = typeof item?.name === "string" ? item.name.trim() : "";
+            const description = typeof item?.description === "string" ? item.description.trim() : "";
+            if (name && description) {
+              return `${name}: ${description}`;
+            }
+            return name || description;
+          })
+          .filter(Boolean);
+      }
+      return Object.entries(parsed.data as Record<string, unknown>).map(([key, value]) => {
+        if (typeof value === "string") {
+          return `${key}: ${value}`;
+        }
+        return `${key}: ${JSON.stringify(value)}`;
+      });
+    }
+
+    return [String(parsed.data)];
+  } catch {
+    return [];
+  }
+}
+
 export function AgentSelector({
   agent,
   model = "",
@@ -21,6 +86,7 @@ export function AgentSelector({
 }: AgentSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [submenuAgent, setSubmenuAgent] = useState<string | null>(null);
+  const [errorAgent, setErrorAgent] = useState<string | null>(null);
   const [menuBodyHeight, setMenuBodyHeight] = useState<number | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const agentColumnRef = useRef<HTMLDivElement>(null);
@@ -31,6 +97,10 @@ export function AgentSelector({
   const submenuAgentStatus = useMemo(
     () => agents.find((item) => item.name === submenuAgent) ?? null,
     [agents, submenuAgent]
+  );
+  const errorAgentStatus = useMemo(
+    () => agents.find((item) => item.name === errorAgent) ?? null,
+    [agents, errorAgent]
   );
   const submenuModels = useMemo(
     () => submenuAgentStatus?.models ?? [],
@@ -51,6 +121,7 @@ export function AgentSelector({
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setIsOpen(false);
         setSubmenuAgent(null);
+        setErrorAgent(null);
         setMenuBodyHeight(null);
       }
     };
@@ -76,6 +147,7 @@ export function AgentSelector({
       onAgentChange(newAgent, nextModel);
       setIsOpen(false);
       setSubmenuAgent(null);
+      setErrorAgent(null);
     },
     [onAgentChange]
   );
@@ -95,6 +167,7 @@ export function AgentSelector({
       if (!entry.available || (entry.models?.length ?? 0) === 0) {
         return;
       }
+      setErrorAgent(null);
       const node = agentColumnRef.current;
       if (node) {
         setMenuBodyHeight(Math.min(node.scrollHeight, 344));
@@ -120,6 +193,7 @@ export function AgentSelector({
             const next = !prev;
             if (!next) {
               setSubmenuAgent(null);
+              setErrorAgent(null);
               setMenuBodyHeight(null);
             }
             return next;
@@ -198,7 +272,7 @@ export function AgentSelector({
             style={{
               width: "fit-content",
               minWidth: "0",
-              maxWidth: submenuAgentStatus ? "min(44vw, 180px)" : "min(72vw, 180px)",
+              maxWidth: submenuAgentStatus || errorAgentStatus ? "min(44vw, 180px)" : "min(72vw, 180px)",
               height: menuBodyHeight ? `${menuBodyHeight}px` : "auto",
               maxHeight: "344px",
               overflowY: "auto",
@@ -217,89 +291,146 @@ export function AgentSelector({
             </div>
             {agents.map((a) => {
               const hasModels = (a.models?.length ?? 0) > 0;
+              const hasError = !a.available && !!a.error;
+              const errorMessage = parseAgentErrorMessage(a.error);
               const isSelected = a.name === agent;
               const isExpanded = submenuAgent === a.name;
+              const isShowingError = errorAgent === a.name;
               return (
-                <button
+                <div
                   key={a.name}
-                  type="button"
-                  onClick={() => handleAgentRowClick(a)}
-                  disabled={!a.available}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: hasModels ? "20px minmax(0, 1fr) 18px" : "20px max-content",
-                    alignItems: "center",
-                    columnGap: "4px",
-                    rowGap: "4px",
-                    width: hasModels ? "100%" : "max-content",
                     minWidth: "100%",
-                    padding: "10px 12px",
-                    border: "none",
-                    background: isExpanded || isSelected ? "rgba(59, 130, 246, 0.08)" : "transparent",
-                    cursor: a.available ? "pointer" : "not-allowed",
-                    fontSize: "13px",
-                    color: !a.available
-                      ? "var(--text-secondary)"
-                      : isExpanded || isSelected
-                      ? "#3b82f6"
-                      : "var(--text-primary)",
-                    fontWeight: isExpanded || isSelected ? 500 : 400,
-                    textAlign: "left",
-                    opacity: a.available ? 1 : 0.6,
-                    whiteSpace: "nowrap",
                   }}
                 >
-                  <AgentIcon agentName={a.name} style={{ width: "16px", height: "16px" }} />
-                  <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
-                  {hasModels ? (
-                    <span
-                      role="button"
-                      aria-label={isExpanded ? `收起 ${a.name} 模型列表` : `展开 ${a.name} 模型列表`}
-                      onClick={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        handleSubmenuToggle(a);
-                      }}
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "20px minmax(0, 1fr) auto",
+                      alignItems: "center",
+                      columnGap: "4px",
+                      width: "100%",
+                      padding: "10px 12px",
+                      background: isExpanded || isSelected ? "rgba(59, 130, 246, 0.08)" : "transparent",
+                      opacity: a.available ? 1 : 0.6,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleAgentRowClick(a)}
+                      disabled={!a.available}
                       style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: "18px",
-                        height: "18px",
-                        borderRadius: "6px",
-                        color: isExpanded ? "#3b82f6" : "var(--text-secondary)",
-                        flexShrink: 0,
-                        justifySelf: "end",
+                        display: "contents",
+                        border: "none",
+                        background: "transparent",
+                        padding: 0,
+                        margin: 0,
+                        cursor: a.available ? "pointer" : "not-allowed",
+                        textAlign: "left",
                       }}
                     >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 12 12"
-                        fill="none"
-                        aria-hidden="true"
+                      <AgentIcon agentName={a.name} style={{ width: "16px", height: "16px" }} />
+                      <span
+                        style={{
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          fontSize: "13px",
+                          color: !a.available
+                            ? "var(--text-secondary)"
+                            : isExpanded || isSelected
+                            ? "#3b82f6"
+                            : "var(--text-primary)",
+                          fontWeight: isExpanded || isSelected ? 500 : 400,
+                          whiteSpace: "nowrap",
+                        }}
                       >
-                        <path
-                          d="M4 2.5 8 6 4 9.5"
-                          stroke="currentColor"
-                          strokeWidth="1.5"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </span>
-                  ) : null}
-                </button>
+                        {a.name}
+                      </span>
+                    </button>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", justifySelf: "end" }}>
+                      {hasError ? (
+                        <button
+                          type="button"
+                          aria-label={`查看 ${a.name} 错误信息`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            setSubmenuAgent(null);
+                            setErrorAgent((prev) => (prev === a.name ? null : a.name));
+                          }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "18px",
+                            height: "18px",
+                            borderRadius: "999px",
+                            border: "1px solid var(--menu-border)",
+                            background: isShowingError ? "rgba(217, 119, 6, 0.12)" : "transparent",
+                            color: "#d97706",
+                            fontSize: "11px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            flexShrink: 0,
+                          }}
+                        >
+                          ?
+                        </button>
+                      ) : null}
+                      {hasModels ? (
+                        <button
+                          type="button"
+                          aria-label={isExpanded ? `收起 ${a.name} 模型列表` : `展开 ${a.name} 模型列表`}
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            handleSubmenuToggle(a);
+                          }}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "18px",
+                            height: "18px",
+                            borderRadius: "6px",
+                            border: "none",
+                            background: "transparent",
+                            color: isExpanded ? "#3b82f6" : "var(--text-secondary)",
+                            cursor: a.available ? "pointer" : "not-allowed",
+                            flexShrink: 0,
+                          }}
+                        >
+                          <svg
+                            width="12"
+                            height="12"
+                            viewBox="0 0 12 12"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M4 2.5 8 6 4 9.5"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               );
             })}
           </div>
 
           <div
             style={{
-              width: submenuAgentStatus ? "fit-content" : "0",
-              minWidth: submenuAgentStatus ? "0" : "0",
-              maxWidth: submenuAgentStatus ? "min(40vw, 180px)" : "0",
-              borderLeft: submenuAgentStatus ? "1px solid var(--menu-divider)" : "none",
+              width: submenuAgentStatus || errorAgentStatus ? "fit-content" : "0",
+              minWidth: submenuAgentStatus || errorAgentStatus ? "0" : "0",
+              maxWidth: submenuAgentStatus || errorAgentStatus ? "min(40vw, 180px)" : "0",
+              borderLeft: submenuAgentStatus || errorAgentStatus ? "1px solid var(--menu-divider)" : "none",
               height: menuBodyHeight ? `${menuBodyHeight}px` : "auto",
               maxHeight: "344px",
               overflowY: "auto",
@@ -308,7 +439,64 @@ export function AgentSelector({
               boxSizing: "border-box",
             }}
           >
-            {submenuAgentStatus ? (
+            {errorAgentStatus && parseAgentErrorMessage(errorAgentStatus.error) ? (
+              <div
+                style={{
+                  width: "100%",
+                  minWidth: 0,
+                  padding: "12px",
+                  boxSizing: "border-box",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: "11px",
+                    fontWeight: 600,
+                    color: "#d97706",
+                    textTransform: "uppercase",
+                    marginBottom: "8px",
+                  }}
+                >
+                  错误信息
+                </div>
+                <div
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "10px",
+                    background: "rgba(217, 119, 6, 0.08)",
+                    border: "1px solid rgba(217, 119, 6, 0.18)",
+                    color: "var(--text-primary)",
+                    fontSize: "12px",
+                    lineHeight: 1.5,
+                    whiteSpace: "normal",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {parseAgentErrorMessage(errorAgentStatus.error)}
+                </div>
+                {parseAgentErrorDetails(errorAgentStatus.error).map((detail) => (
+                  <div
+                    key={detail}
+                    style={{
+                      marginTop: "8px",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      background: "rgba(0, 0, 0, 0.03)",
+                      border: "1px solid var(--menu-divider)",
+                      color: "var(--text-secondary)",
+                      fontSize: "11px",
+                      lineHeight: 1.5,
+                      whiteSpace: "normal",
+                      overflowWrap: "anywhere",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {detail}
+                  </div>
+                ))}
+              </div>
+            ) : submenuAgentStatus ? (
               <>
               {submenuAgentStatus.current_model_id ? (
                 <button
@@ -319,8 +507,8 @@ export function AgentSelector({
                     flexDirection: "column",
                     alignItems: "flex-start",
                     gap: "2px",
-                    width: "max-content",
-                    minWidth: "100%",
+                    width: "100%",
+                    minWidth: 0,
                     padding: "10px 12px",
                     border: "none",
                     background: submenuAgentStatus.name === agent && !model ? "rgba(59, 130, 246, 0.08)" : "transparent",
@@ -330,7 +518,7 @@ export function AgentSelector({
                   }}
                 >
                   <span style={{ fontSize: "13px", fontWeight: 500 }}>默认模型</span>
-                  <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-secondary)", whiteSpace: "normal", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                     当前默认: {submenuAgentStatus.current_model_id}
                   </span>
                 </button>
@@ -348,8 +536,8 @@ export function AgentSelector({
                       flexDirection: "column",
                       alignItems: "flex-start",
                       gap: "2px",
-                      width: "max-content",
-                      minWidth: "100%",
+                      width: "100%",
+                      minWidth: 0,
                       padding: "10px 12px",
                       border: "none",
                       borderTop: showTopBorder ? "1px solid var(--menu-divider)" : "none",
@@ -365,7 +553,7 @@ export function AgentSelector({
                       {item.name || item.id}
                     </span>
                     {item.description ? (
-                      <span style={{ fontSize: "11px", color: "var(--text-secondary)" }}>
+                      <span style={{ fontSize: "11px", color: "var(--text-secondary)", whiteSpace: "normal", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                         {item.description}
                       </span>
                     ) : item.hidden ? (

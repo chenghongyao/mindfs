@@ -97,6 +97,7 @@ func (h *WSHandler) broadcastAgentStatusChange(status agent.Status) {
 		Type: "agent.status.changed",
 		Payload: map[string]any{
 			"name":             status.Name,
+			"installed":        status.Installed,
 			"available":        status.Available,
 			"version":          status.Version,
 			"error":            status.Error,

@@ -210,7 +210,7 @@ func (h *HTTPHandler) handleAgentsList(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, []map[string]any{})
 		return
 	}
-	statuses := h.AppContext.GetProber().GetAllStatuses()
+	statuses := h.AppContext.GetProber().GetInstalledStatuses()
 	respondJSON(w, http.StatusOK, statuses)
 }
 

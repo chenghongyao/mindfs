@@ -7,9 +7,18 @@ type AgentIconProps = {
 };
 
 const ICON_URLS: Record<string, { src: string; alt: string }> = {
+  augment: { src: appPath('/assets/agents/augment.svg'), alt: 'Augment' },
   codex: { src: appPath('/assets/agents/codex.svg'), alt: 'Codex' },
   claude: { src: appPath('/assets/agents/claude.svg'), alt: 'Claude' },
+  cline: { src: appPath('/assets/agents/cline.svg'), alt: 'Cline' },
+  copilot: { src: appPath('/assets/agents/copilot.svg'), alt: 'Copilot' },
+  cursor: { src: appPath('/assets/agents/cursor.svg'), alt: 'Cursor' },
   gemini: { src: appPath('/assets/agents/gemini.svg'), alt: 'Gemini' },
+  kiro: { src: appPath('/assets/agents/kiro.svg'), alt: 'Kiro' },
+  kimi: { src: appPath('/assets/agents/kimi.svg'), alt: 'Kimi' },
+  openclaw: { src: appPath('/assets/agents/openclaw.svg'), alt: 'OpenClaw' },
+  opencode: { src: appPath('/assets/agents/opencode.svg'), alt: 'OpenCode' },
+  qwen: { src: appPath('/assets/agents/qwen.svg'), alt: 'Qwen' },
 };
 
 const iconCache = new Map<string, string>();
@@ -82,7 +91,25 @@ export function AgentIcon({ agentName, ...props }: AgentIconProps) {
   const width = style.width ?? props.width ?? 16;
   const height = style.height ?? props.height ?? 16;
   let icon: { src: string; alt: string } | null = null;
-  if (lowerAgentName.includes('codex') || lowerAgentName.includes('copilot')) {
+  if (lowerAgentName.includes('augment')) {
+    icon = ICON_URLS.augment;
+  } else if (lowerAgentName.includes('cursor')) {
+    icon = ICON_URLS.cursor;
+  } else if (lowerAgentName.includes('openclaw')) {
+    icon = ICON_URLS.openclaw;
+  } else if (lowerAgentName.includes('opencode')) {
+    icon = ICON_URLS.opencode;
+  } else if (lowerAgentName.includes('qwen')) {
+    icon = ICON_URLS.qwen;
+  } else if (lowerAgentName.includes('kiro')) {
+    icon = ICON_URLS.kiro;
+  } else if (lowerAgentName.includes('kimi')) {
+    icon = ICON_URLS.kimi;
+  } else if (lowerAgentName.includes('cline')) {
+    icon = ICON_URLS.cline;
+  } else if (lowerAgentName.includes('copilot')) {
+    icon = ICON_URLS.copilot;
+  } else if (lowerAgentName.includes('codex')) {
     icon = ICON_URLS.codex;
   } else if (lowerAgentName.includes('claude')) {
     icon = ICON_URLS.claude;

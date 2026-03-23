@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"sort"
@@ -16,6 +17,7 @@ import (
 
 type Status struct {
 	Name           string                 `json:"name"`
+	Installed      bool                   `json:"installed"`
 	Available      bool                   `json:"available"`
 	Version        string                 `json:"version,omitempty"`
 	Error          string                 `json:"error,omitempty"`
@@ -29,6 +31,7 @@ const (
 	probeSessionTimeout     = 45 * time.Second
 	probeInteractionTimeout = 3 * time.Minute
 	probeModelListTimeout   = 30 * time.Second
+	maxProbeConcurrency     = 4
 )
 
 // Prober 管理 Agent 可用性探测
@@ -37,6 +40,7 @@ type Prober struct {
 	pool          *Pool
 	statuses      map[string]Status
 	mu            sync.RWMutex
+	probeRunMu    sync.Mutex
 	probeInterval time.Duration
 	stopCh        chan struct{}
 	listeners     []func(Status)
@@ -57,7 +61,7 @@ func NewProber(cfg *Config, pool *Pool, probeInterval time.Duration) *Prober {
 	if cfg != nil {
 		now := time.Now().UTC()
 		for _, def := range cfg.Agents {
-			p.statuses[def.Name] = unavailableStatus(def.Name, "probing", now)
+			p.statuses[def.Name] = unavailableStatus(def.Name, false, "probing", now)
 		}
 	}
 	return p
@@ -68,14 +72,15 @@ func (p *Prober) Start(ctx context.Context) {
 	// 首次全量探测放到后台，避免阻塞服务启动和请求处理。
 	go p.ProbeAll(ctx)
 
-	// 启动定期探测：仅重试失败状态
+	// 启动定期探测：分别重试未安装命令和已安装但不可用的 Agent。
 	ticker := time.NewTicker(p.probeInterval)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				p.probeFailedOnly(ctx)
+				p.probeMissingCommands()
+				p.probeFailedInstalledOnly(ctx)
 			case <-p.stopCh:
 				return
 			case <-ctx.Done():
@@ -101,30 +106,11 @@ func (p *Prober) ProbeAll(ctx context.Context) []Status {
 		return nil
 	}
 
-	statuses := make([]Status, 0, len(p.cfg.Agents))
-	for _, def := range p.cfg.Agents {
-		status := p.probeAgent(ctx, def.Name, def)
-		statuses = append(statuses, status)
-		p.setStatus(status)
-	}
+	var statuses []Status
+	p.withProbeRun(func() {
+		statuses = p.probeConfiguredAgents(ctx, p.cfg.Agents)
+	})
 	return statuses
-}
-
-// ProbeOne 探测单个 Agent 并更新缓存
-func (p *Prober) ProbeOne(ctx context.Context, name string) Status {
-	if p.cfg == nil {
-		return unavailableStatus(name, "config not loaded", time.Now().UTC())
-	}
-
-	def, ok := p.cfg.GetAgent(name)
-	if !ok {
-		return unavailableStatus(name, "agent not configured", time.Now().UTC())
-	}
-
-	status := p.probeAgent(ctx, name, def)
-	p.setStatus(status)
-
-	return status
 }
 
 // ReportFailure marks an agent as unavailable due to runtime interaction/probe failure.
@@ -133,18 +119,22 @@ func (p *Prober) ReportFailure(name string, err error) {
 	if err != nil {
 		msg = err.Error()
 	}
-	p.setStatus(unavailableStatus(name, msg, time.Now().UTC()))
+	installed := true
+	current, ok := p.GetStatus(name)
+	if ok {
+		installed = current.Installed
+	}
+	p.setStatus(unavailableStatus(name, installed, msg, time.Now().UTC()))
 }
 
 // ReportSuccess marks an agent as available due to successful runtime interaction.
 func (p *Prober) ReportSuccess(name string) {
-	p.mu.Lock()
-	st := p.statuses[name]
+	st, _ := p.GetStatus(name)
 	st.Name = name
+	st.Installed = true
 	st.Available = true
 	st.Error = ""
 	st.LastProbe = time.Now().UTC()
-	p.mu.Unlock()
 	p.setStatus(st)
 }
 
@@ -188,6 +178,19 @@ func (p *Prober) GetAllStatuses() []Status {
 	return statuses
 }
 
+// GetInstalledStatuses returns configured statuses filtered to installed agents.
+func (p *Prober) GetInstalledStatuses() []Status {
+	all := p.GetAllStatuses()
+	filtered := make([]Status, 0, len(all))
+	for _, st := range all {
+		if !st.Installed {
+			continue
+		}
+		filtered = append(filtered, st)
+	}
+	return filtered
+}
+
 // IsAvailable 检查 Agent 是否可用
 func (p *Prober) IsAvailable(name string) bool {
 	p.mu.RLock()
@@ -196,25 +199,16 @@ func (p *Prober) IsAvailable(name string) bool {
 	return ok && status.Available
 }
 
-// ProbeAgent 探测单个 Agent
-func ProbeAgent(ctx context.Context, name string, def Definition) Status {
-	return probeAgentWithPool(ctx, name, def, nil)
-}
-
-func (p *Prober) probeAgent(ctx context.Context, name string, def Definition) Status {
-	return probeAgentWithPool(ctx, name, def, p.pool)
-}
-
-func probeAgentWithPool(ctx context.Context, name string, def Definition, pool *Pool) Status {
-	status := unavailableStatus(name, "", time.Now().UTC())
-	if def.Command == "" {
-		status.Error = "command required"
+func probeConfiguredAgentWithPool(ctx context.Context, name string, def Definition, pool *Pool) Status {
+	status := probeInstallStatus(name, def, time.Now().UTC())
+	if !status.Installed {
 		return status
 	}
-	if _, err := exec.LookPath(def.Command); err != nil {
-		status.Error = err.Error()
-		return status
-	}
+	return probeInstalledAgentWithPool(ctx, name, def, pool, status)
+}
+
+func probeInstalledAgentWithPool(ctx context.Context, name string, def Definition, pool *Pool, status Status) Status {
+	status.Installed = true
 
 	tmpRoot, err := os.MkdirTemp("", "mindfs-agent-probe-*")
 	if err != nil {
@@ -228,7 +222,11 @@ func probeAgentWithPool(ctx context.Context, name string, def Definition, pool *
 		defer pool.CloseAll()
 	}
 
-	sessionKey := "probe-" + time.Now().UTC().Format("20060102-150405")
+	sessionKey := fmt.Sprintf(
+		"probe-%s-%s",
+		name,
+		time.Now().UTC().Format("20060102-150405"),
+	)
 	defer pool.Close(sessionKey)
 	sessionCtx, sessionCancel := context.WithTimeout(ctx, probeSessionTimeout)
 	defer sessionCancel()
@@ -251,25 +249,35 @@ func probeAgentWithPool(ctx context.Context, name string, def Definition, pool *
 	}
 
 	status.Available = true
+	status.Error = ""
 	populateProbeModels(ctx, sess, &status)
 	return status
 }
 
-func (p *Prober) probeFailedOnly(ctx context.Context) {
+func (p *Prober) probeMissingCommands() {
 	if p.cfg == nil {
 		return
 	}
-	for _, def := range p.cfg.Agents {
-		name := def.Name
-		p.mu.RLock()
-		st, ok := p.statuses[name]
-		p.mu.RUnlock()
-		if ok && st.Available {
-			continue
-		}
-		status := p.probeAgent(ctx, name, def)
-		p.setStatus(status)
+	p.withProbeRun(func() {
+		defs := p.collectDefinitions(func(st Status, ok bool) bool {
+			return !ok || !st.Installed
+		})
+		log.Printf("[agent/probe] probe_missing_commands count=%d agents=%s", len(defs), definitionNames(defs))
+		p.probeInstallOnly(defs)
+	})
+}
+
+func (p *Prober) probeFailedInstalledOnly(ctx context.Context) {
+	if p.cfg == nil {
+		return
 	}
+	p.withProbeRun(func() {
+		defs := p.collectDefinitions(func(st Status, ok bool) bool {
+			return ok && st.Installed && !st.Available
+		})
+		log.Printf("[agent/probe] probe_failed_installed count=%d agents=%s", len(defs), definitionNames(defs))
+		p.probeInstalledAgents(ctx, defs)
+	})
 }
 
 // AddListener registers a callback invoked when an agent status changes.
@@ -284,6 +292,9 @@ func (p *Prober) AddListener(listener func(Status)) {
 
 func statusChanged(prev Status, next Status) bool {
 	if prev.Name != next.Name {
+		return true
+	}
+	if prev.Installed != next.Installed {
 		return true
 	}
 	if prev.Available != next.Available {
@@ -328,13 +339,29 @@ func (p *Prober) setStatus(status Status) {
 	}
 }
 
-func unavailableStatus(name, errMsg string, ts time.Time) Status {
+func unavailableStatus(name string, installed bool, errMsg string, ts time.Time) Status {
 	return Status{
 		Name:      name,
+		Installed: installed,
 		Available: false,
 		Error:     errMsg,
 		LastProbe: ts,
 	}
+}
+
+func probeInstallStatus(name string, def Definition, ts time.Time) Status {
+	status := unavailableStatus(name, false, "", ts)
+	if def.Command == "" {
+		status.Error = "command required"
+		return status
+	}
+	if _, err := exec.LookPath(def.Command); err != nil {
+		status.Error = err.Error()
+		return status
+	}
+	status.Installed = true
+	status.Error = "probe pending"
+	return status
 }
 
 func resolveProbePool(def Definition, shared *Pool) (*Pool, bool) {
@@ -365,6 +392,104 @@ func normalizeStatus(status Status) Status {
 	status.Models = nil
 	status.ModelsError = ""
 	return status
+}
+
+func (p *Prober) withProbeRun(fn func()) {
+	p.probeRunMu.Lock()
+	defer p.probeRunMu.Unlock()
+	fn()
+}
+
+func (p *Prober) collectDefinitions(include func(Status, bool) bool) []Definition {
+	defs := make([]Definition, 0, len(p.cfg.Agents))
+	for _, def := range p.cfg.Agents {
+		status, ok := p.GetStatus(def.Name)
+		if !include(status, ok) {
+			continue
+		}
+		defs = append(defs, def)
+	}
+	return defs
+}
+
+func (p *Prober) probeConfiguredAgents(ctx context.Context, defs []Definition) []Status {
+	if len(defs) == 0 {
+		return nil
+	}
+
+	statuses := make([]Status, len(defs))
+	p.runDefinitionsConcurrently(defs, func(i int, def Definition) {
+		status := probeConfiguredAgentWithPool(ctx, def.Name, def, p.pool)
+		statuses[i] = status
+		p.setStatus(status)
+	})
+	return statuses
+}
+
+func (p *Prober) probeInstallOnly(defs []Definition) {
+	if len(defs) == 0 {
+		return
+	}
+
+	p.runDefinitionsConcurrently(defs, func(_ int, def Definition) {
+		status := probeInstallStatus(def.Name, def, time.Now().UTC())
+		p.setStatus(status)
+	})
+}
+
+func (p *Prober) probeInstalledAgents(ctx context.Context, defs []Definition) {
+	if len(defs) == 0 {
+		return
+	}
+
+	p.runDefinitionsConcurrently(defs, func(_ int, def Definition) {
+		status := probeInstalledAgentWithPool(ctx, def.Name, def, p.pool, probeInstallStatus(def.Name, def, time.Now().UTC()))
+		p.setStatus(status)
+	})
+}
+
+func (p *Prober) runDefinitionsConcurrently(defs []Definition, fn func(i int, def Definition)) {
+	workerCount := probeWorkerCount(len(defs))
+	if workerCount == 1 {
+		for i, def := range defs {
+			fn(i, def)
+		}
+		return
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, workerCount)
+	for i, def := range defs {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, def Definition) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fn(i, def)
+		}(i, def)
+	}
+	wg.Wait()
+}
+
+func probeWorkerCount(total int) int {
+	if total < 1 {
+		return 1
+	}
+	if total > maxProbeConcurrency {
+		return maxProbeConcurrency
+	}
+	return total
+}
+
+func definitionNames(defs []Definition) string {
+	if len(defs) == 0 {
+		return "-"
+	}
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	return strings.Join(names, ",")
 }
 
 // VerifySessionInteraction sends a deterministic ping prompt and verifies the response contains the token.
@@ -402,7 +527,7 @@ func VerifySessionInteraction(ctx context.Context, sess agenttypes.Session) erro
 
 	prompt := "Reply with EXACT text: " + token + ". No markdown, no explanation."
 	if err := sess.SendMessage(ctx, prompt); err != nil {
-		return fmt.Errorf("send message: %w", err)
+		return err
 	}
 
 	select {

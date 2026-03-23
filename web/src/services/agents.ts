@@ -4,6 +4,7 @@ import { appPath } from "./base";
 
 export type AgentStatus = {
   name: string;
+  installed: boolean;
   available: boolean;
   version?: string;
   error?: string;
