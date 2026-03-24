@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
+	"time"
 
 	"mindfs/server/internal/agent/acp"
 	"mindfs/server/internal/agent/claude"
@@ -116,6 +118,52 @@ func (p *Pool) openSession(ctx context.Context, protocol Protocol, def Definitio
 			Env:        cloneEnv(def.Env),
 			Cwd:        def.ResolveCwd(in.RootPath),
 		})
+	}
+}
+
+func (p *Pool) KillAgentProcess(agentName string, wait time.Duration) (string, bool) {
+	def, ok := p.cfg.GetAgent(agentName)
+	if !ok {
+		return "", false
+	}
+
+	protocol := def.Protocol
+	if protocol == "" {
+		protocol = DefaultProtocol(agentName)
+	}
+	if protocol != ProtocolACP {
+		return "", false
+	}
+
+	p.mu.Lock()
+	for key, entry := range p.sessions {
+		if entry == nil || entry.agentName != agentName || entry.protocol != ProtocolACP {
+			continue
+		}
+		if entry.session != nil {
+			_ = entry.session.Close()
+		}
+		delete(p.sessions, key)
+	}
+	p.mu.Unlock()
+
+	proc := p.acp.CloseProcess(agentName)
+	if proc == nil {
+		return "", false
+	}
+	proc.Close()
+
+	deadline := time.Now().Add(wait)
+	for {
+		if hint, ok := proc.RecentStderrHint(); ok {
+			log.Printf("[agent/pool] kill_agent_process.hint agent=%s hint=%q", agentName, hint)
+			return hint, true
+		}
+		if time.Now().After(deadline) {
+			log.Printf("[agent/pool] kill_agent_process.no_hint agent=%s wait_ms=%d", agentName, wait.Milliseconds())
+			return "", false
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 }
 

@@ -244,6 +244,10 @@ func probeInstalledAgentWithPool(ctx context.Context, name string, def Definitio
 	interactionCtx, interactionCancel := context.WithTimeout(ctx, probeInteractionTimeout)
 	defer interactionCancel()
 	if err := VerifySessionInteraction(interactionCtx, sess); err != nil {
+		if hint, ok := pool.KillAgentProcess(name, 750*time.Millisecond); ok {
+			status.Error = hint
+			return status
+		}
 		status.Error = err.Error()
 		return status
 	}

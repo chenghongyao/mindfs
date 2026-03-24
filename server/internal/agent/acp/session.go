@@ -83,6 +83,17 @@ func (r *Runtime) CloseSession(sessionKey string) {
 	}
 }
 
+func (r *Runtime) CloseProcess(agentName string) *Process {
+	if strings.TrimSpace(agentName) == "" {
+		return nil
+	}
+	r.mu.Lock()
+	proc := r.processes[agentName]
+	delete(r.processes, agentName)
+	r.mu.Unlock()
+	return proc
+}
+
 func (r *Runtime) CloseAll() {
 	procs := r.listProcessesAndReset()
 	for _, proc := range procs {

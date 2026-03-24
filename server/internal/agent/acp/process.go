@@ -3,12 +3,19 @@
 package acp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"log"
+	"os"
 	"os/exec"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -24,12 +31,15 @@ type Process struct {
 	cmd       *exec.Cmd
 	conn      *acp.ClientSideConnection
 	client    *mindfsClient
+	waitCh    chan error
 
 	mu           sync.RWMutex
 	sessions     map[string]*sessionState // sessionKey -> state
 	sessionsByID map[string]*sessionState // ACP session id -> state
 	capability   CapabilitySnapshot
 	models       *acp.SessionModelState
+	stderrHint   stderrHintState
+	activePrompt activePromptState
 }
 
 type CapabilitySnapshot struct {
@@ -37,6 +47,21 @@ type CapabilitySnapshot struct {
 	PromptSupportsImage   bool
 	PromptSupportsContext bool
 }
+
+type stderrHintState struct {
+	mu            sync.Mutex
+	expectMessage bool
+	message       string
+	messageAt     time.Time
+}
+
+type activePromptState struct {
+	mu     sync.Mutex
+	id     int64
+	cancel context.CancelFunc
+}
+
+var stderrMessagePattern = regexp.MustCompile(`"message"\s*:\s*"([^"]+)"`)
 
 type sessionState struct {
 	ID       acp.SessionId
@@ -225,12 +250,7 @@ func Start(ctx context.Context, agentName, command string, args []string, cwd st
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	if len(env) > 0 {
-		cmd.Env = cmd.Environ()
-		for k, v := range env {
-			cmd.Env = append(cmd.Env, k+"="+v)
-		}
-	}
+	configureProcessCommand(cmd, env)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -240,7 +260,10 @@ func Start(ctx context.Context, agentName, command string, args []string, cwd st
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = nil
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, err
+	}
 
 	if err := cmd.Start(); err != nil {
 		return nil, err
@@ -251,8 +274,13 @@ func Start(ctx context.Context, agentName, command string, args []string, cwd st
 		cmd:          cmd,
 		sessions:     make(map[string]*sessionState),
 		sessionsByID: make(map[string]*sessionState),
+		waitCh:       make(chan error, 1),
 	}
 	proc.client = &mindfsClient{proc: proc}
+	go streamProcessStderr(proc, stderr)
+	go func() {
+		proc.waitCh <- cmd.Wait()
+	}()
 
 	// Create ACP connection - coder/acp-go-sdk uses io.Writer and io.Reader directly
 	proc.conn = acp.NewClientSideConnection(proc.client, stdin, stdout)
@@ -338,15 +366,22 @@ func (p *Process) SendMessage(ctx context.Context, sessionKey, content string) e
 	}
 	log.Printf("[agent/acp] send.begin agent=%s session_key=%s session_id=%s prompt_chars=%d content=%q", p.agentLabel(), sessionKey, sess.ID, len(content), content)
 
-	_, err := p.conn.Prompt(ctx, acp.PromptRequest{
+	promptCtx, promptCancel := context.WithCancel(ctx)
+	promptID := time.Now().UnixNano()
+	p.setActivePrompt(promptID, promptCancel)
+	defer func() {
+		p.clearActivePrompt(promptID)
+		promptCancel()
+	}()
+
+	_, err := p.conn.Prompt(promptCtx, acp.PromptRequest{
 		SessionId: sess.ID,
 		Prompt: []acp.ContentBlock{
 			acp.TextBlock(content),
 		},
 	})
 	if err != nil {
-		log.Printf("[agent/acp] send.error agent=%s session_key=%s session_id=%s err=%v", p.agentLabel(), sessionKey, sess.ID, err)
-		return err
+		return p.wrapPromptError(sessionKey, string(sess.ID), err)
 	}
 
 	// Signal completion
@@ -384,11 +419,47 @@ func (p *Process) CloseSession(sessionKey string) {
 // Close terminates the process.
 func (p *Process) Close() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.cmd != nil && p.cmd.Process != nil {
-		p.cmd.Process.Kill()
+	cmd := p.cmd
+	waitCh := p.waitCh
+	p.cmd = nil
+	p.waitCh = nil
+	p.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
+		return nil
 	}
-	return nil
+
+	pid := cmd.Process.Pid
+	log.Printf("[agent/acp] process.close.begin agent=%s pid=%d", p.agentLabel(), pid)
+	if err := killProcess(cmd.Process); err != nil && !strings.Contains(strings.ToLower(err.Error()), "process already finished") {
+		log.Printf("[agent/acp] process.close.kill_error agent=%s pid=%d err=%v", p.agentLabel(), pid, err)
+		return err
+	}
+
+	select {
+	case err := <-waitCh:
+		if err != nil && !strings.Contains(strings.ToLower(err.Error()), "signal: killed") {
+			log.Printf("[agent/acp] process.close.wait_error agent=%s pid=%d err=%v", p.agentLabel(), pid, err)
+			return err
+		}
+		log.Printf("[agent/acp] process.close.done agent=%s pid=%d", p.agentLabel(), pid)
+		return nil
+	case <-time.After(10 * time.Second):
+		log.Printf("[agent/acp] process.close.timeout agent=%s pid=%d", p.agentLabel(), pid)
+		return nil
+	}
+}
+
+func killProcess(proc *os.Process) error {
+	if proc == nil {
+		return nil
+	}
+	if runtime.GOOS != "windows" {
+		if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err == nil {
+			return nil
+		}
+	}
+	return proc.Kill()
 }
 
 // SessionID returns the ACP session ID for a MindFS session key.
@@ -439,6 +510,10 @@ func (p *Process) SessionModelState(sessionKey string) *acp.SessionModelState {
 	return sess.getModels()
 }
 
+func (p *Process) RecentStderrHint() (string, bool) {
+	return p.recentStderrHint()
+}
+
 func (p *Process) getSessionByKey(sessionKey string) *sessionState {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -468,4 +543,135 @@ func wrapSessionUpdate(sessionID string, update acp.SessionUpdate) SessionUpdate
 		result.Type = UpdateTypeToolUpdate
 	}
 	return result
+}
+
+func streamProcessStderr(proc *Process, reader io.Reader) {
+	if reader == nil {
+		return
+	}
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		log.Printf("[agent/acp][stderr] agent=%s %s", proc.agentLabel(), line)
+		proc.captureStderrHint(line)
+	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("[agent/acp][stderr] agent=%s stream_error=%v", proc.agentLabel(), err)
+	}
+}
+
+func configureProcessCommand(cmd *exec.Cmd, env map[string]string) {
+	if cmd == nil {
+		return
+	}
+	if runtime.GOOS != "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if len(env) == 0 {
+		return
+	}
+	cmd.Env = cmd.Environ()
+	for key, value := range env {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+}
+
+func (p *Process) wrapPromptError(sessionKey, sessionID string, err error) error {
+	if hint, ok := p.recentStderrHint(); ok {
+		log.Printf("[agent/acp] send.error agent=%s session_key=%s session_id=%s err=%v hint=%q", p.agentLabel(), sessionKey, sessionID, err, hint)
+		return errors.New(hint)
+	}
+	log.Printf("[agent/acp] send.error agent=%s session_key=%s session_id=%s err=%v", p.agentLabel(), sessionKey, sessionID, err)
+	return err
+}
+
+func (p *Process) captureStderrHint(line string) {
+	if p == nil {
+		return
+	}
+	p.stderrHint.mu.Lock()
+	defer p.stderrHint.mu.Unlock()
+
+	if strings.Contains(line, `"code":`) {
+		p.stderrHint.expectMessage = true
+		return
+	}
+	if !p.stderrHint.expectMessage {
+		return
+	}
+	message, ok := parseStderrHintMessage(line)
+	if !ok {
+		return
+	}
+	p.setRecentStderrHintLocked(message)
+	p.cancelActivePrompt()
+}
+
+func (p *Process) setRecentStderrHintLocked(message string) {
+	p.stderrHint.message = message
+	p.stderrHint.messageAt = time.Now()
+	p.stderrHint.expectMessage = false
+}
+
+func parseStderrHintMessage(line string) (string, bool) {
+	match := stderrMessagePattern.FindStringSubmatch(line)
+	if len(match) < 2 {
+		return "", false
+	}
+	return strings.TrimSpace(match[1]), true
+}
+
+func (p *Process) recentStderrHint() (string, bool) {
+	if p == nil {
+		return "", false
+	}
+	p.stderrHint.mu.Lock()
+	defer p.stderrHint.mu.Unlock()
+	if strings.TrimSpace(p.stderrHint.message) == "" {
+		return "", false
+	}
+	if time.Since(p.stderrHint.messageAt) > 5*time.Minute {
+		return "", false
+	}
+	return p.stderrHint.message, true
+}
+
+func (p *Process) setActivePrompt(id int64, cancel context.CancelFunc) {
+	if p == nil {
+		return
+	}
+	p.activePrompt.mu.Lock()
+	p.activePrompt.id = id
+	p.activePrompt.cancel = cancel
+	p.activePrompt.mu.Unlock()
+}
+
+func (p *Process) clearActivePrompt(id int64) {
+	if p == nil {
+		return
+	}
+	p.activePrompt.mu.Lock()
+	if p.activePrompt.id == id {
+		p.activePrompt.id = 0
+		p.activePrompt.cancel = nil
+	}
+	p.activePrompt.mu.Unlock()
+}
+
+func (p *Process) cancelActivePrompt() {
+	if p == nil {
+		return
+	}
+	p.activePrompt.mu.Lock()
+	cancel := p.activePrompt.cancel
+	p.activePrompt.id = 0
+	p.activePrompt.cancel = nil
+	p.activePrompt.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
