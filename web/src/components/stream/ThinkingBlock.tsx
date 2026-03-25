@@ -31,9 +31,9 @@ export const ThinkingBlock = memo(function ThinkingBlock({ content, defaultExpan
           width: "100%",
           display: "flex",
           alignItems: "center",
-          gap: "6px",
+          gap: "5px",
           justifyContent: "space-between",
-          padding: "8px 10px",
+          padding: "6px 8px",
           background: "none",
           border: "none",
           cursor: "pointer",
@@ -44,7 +44,7 @@ export const ThinkingBlock = memo(function ThinkingBlock({ content, defaultExpan
           overflow: "hidden",
         }}
       >
-        <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", minWidth: 0, flex: 1 }}>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>思考过程</span>
           <span style={{ color: "var(--text-secondary)", fontWeight: 400, flexShrink: 0 }}>
             ({content.length} 字符)

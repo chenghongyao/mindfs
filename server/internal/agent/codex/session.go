@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"strings"
@@ -221,7 +222,7 @@ func (s *session) emitTool(eventType types.EventType, toolCall types.ToolCall) {
 	if eventType == types.EventTypeToolCall {
 		logLabel = "output.tool_call"
 	}
-	log.Printf("[agent/codex] %s session=%s tool=%s status=%s", logLabel, s.sessionKey, toolCallLabel(toolCall), toolCall.Status)
+	log.Printf("[agent/codex] %s session=%s tool=%s status=%s raw=%s", logLabel, s.sessionKey, toolCallLabel(toolCall), toolCall.Status, toolCallLogValue(toolCall))
 	s.emit(types.Event{Type: eventType, SessionID: s.SessionID(), Data: toolCall})
 }
 
@@ -415,4 +416,12 @@ func toolCallLabel(tc types.ToolCall) string {
 		return string(tc.Kind)
 	}
 	return "tool"
+}
+
+func toolCallLogValue(toolCall types.ToolCall) string {
+	raw, err := json.Marshal(toolCall)
+	if err != nil {
+		return `{"marshal_error":true}`
+	}
+	return string(raw)
 }

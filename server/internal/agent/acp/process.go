@@ -137,12 +137,8 @@ func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNoti
 	internalUpdate := wrapSessionUpdate(string(params.SessionId), params.Update)
 	if internalUpdate.Type != "" {
 		switch internalUpdate.Type {
-		case UpdateTypeMessageChunk:
-			content := ""
-			if params.Update.AgentMessageChunk != nil && params.Update.AgentMessageChunk.Content.Text != nil {
-				content = params.Update.AgentMessageChunk.Content.Text.Text
-			}
-			log.Printf("[agent/acp] session.update agent=%s type=%s content=%q", c.proc.agentLabel(), internalUpdate.Type, content)
+		case UpdateTypeToolCall, UpdateTypeToolUpdate:
+			log.Printf("[agent/acp] session.update agent=%s type=%s raw=%s", c.proc.agentLabel(), internalUpdate.Type, sessionUpdateLogValue(convertEvent(internalUpdate).Data))
 		default:
 			log.Printf("[agent/acp] session.update agent=%s type=%s", c.proc.agentLabel(), internalUpdate.Type)
 		}
@@ -674,4 +670,12 @@ func (p *Process) cancelActivePrompt() {
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func sessionUpdateLogValue(data any) string {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return `{"marshal_error":true}`
+	}
+	return string(raw)
 }

@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"path/filepath"
 	"strings"
 	"sync"
 
-	claudeagent "github.com/roasbeef/claude-agent-sdk-go"
 	types "mindfs/server/internal/agent/types"
+
+	claudeagent "github.com/roasbeef/claude-agent-sdk-go"
 )
 
 const chunkFlushThreshold = 24
@@ -99,6 +101,9 @@ type session struct {
 	sawDelta        bool
 	pendingText     strings.Builder
 	pendingThinking strings.Builder
+
+	pendingToolMu    sync.Mutex
+	pendingToolCalls []types.ToolCall
 }
 
 func (s *session) SendMessage(ctx context.Context, content string) error {
@@ -204,6 +209,7 @@ func (s *session) consumeMessages() {
 	s.pendingText.Reset()
 	s.pendingThinking.Reset()
 	for msg := range s.stream.Messages() {
+		raw, _ := json.Marshal(msg)
 		s.updateSessionID(msg)
 
 		switch m := msg.(type) {
@@ -212,15 +218,23 @@ func (s *session) consumeMessages() {
 		case claudeagent.AssistantMessage:
 			s.flushAllDeltas()
 			s.handleAssistantMessage(m, s.sawDelta)
+		case claudeagent.UserMessage:
+			s.flushAllDeltas()
+			s.handleUserMessage(m)
+			s.logRawMessage(raw)
 		case claudeagent.ToolProgressMessage:
 			s.flushAllDeltas()
 			s.emitToolUpdate(m.ToolUseID, m.ToolName)
+			s.logRawMessage(raw)
 		case claudeagent.ResultMessage:
 			s.flushAllDeltas()
+			s.logRawMessage(raw)
 			log.Printf("[agent/claude] output.done session=%s status=%s subtype=%s", s.sessionKey, m.Status, m.Subtype)
 			s.emit(types.Event{Type: types.EventTypeMessageDone, SessionID: s.SessionID()})
 			s.completeTurn(resultErr(m))
 			s.sawDelta = false
+		default:
+			s.logRawMessage(raw)
 		}
 	}
 
@@ -300,23 +314,209 @@ func (s *session) handleAssistantMessage(msg claudeagent.AssistantMessage, sawDe
 		case "thinking":
 			s.emitThoughtChunk(block.Text)
 		case "tool_use":
-			log.Printf("[agent/claude] output.tool_call session=%s tool=%s status=running", s.sessionKey, block.Name)
+			toolCall := newRunningToolCall(block.ID, block.Name, block.Type, block.Input)
+			s.trackPendingToolCall(toolCall)
+			log.Printf("[agent/claude] output.tool_call session=%s tool=%s status=%s raw=%s", s.sessionKey, block.Name, toolCall.Status, toolCallLogValue(toolCall))
 			s.emit(types.Event{
 				Type:      types.EventTypeToolCall,
 				SessionID: s.SessionID(),
-				Data: types.ToolCall{
-					CallID:  block.ID,
-					Title:   block.Name,
-					Status:  "running",
-					Kind:    mapToolKind(block.Name),
-					RawType: block.Type,
-					Meta: map[string]any{
-						"input": string(block.Input),
-					},
-				},
+				Data:      toolCall,
 			})
 		}
 	}
+}
+
+func (s *session) handleUserMessage(msg claudeagent.UserMessage) {
+	update, ok := s.toolResultUpdate(msg)
+	if !ok {
+		return
+	}
+	s.emit(types.Event{
+		Type:      types.EventTypeToolUpdate,
+		SessionID: s.SessionID(),
+		Data:      update,
+	})
+}
+
+func newRunningToolCall(callID, name, rawType string, input json.RawMessage) types.ToolCall {
+	title, meta := summarizeToolCall(name, input)
+	return types.ToolCall{
+		CallID:  callID,
+		Title:   title,
+		Status:  "running",
+		Kind:    mapToolKind(name),
+		RawType: rawType,
+		Meta:    meta,
+	}
+}
+
+func summarizeToolCall(name string, input json.RawMessage) (string, map[string]any) {
+	rawInput := strings.TrimSpace(string(input))
+	if rawInput == "" {
+		return name, nil
+	}
+
+	meta := map[string]any{"input": rawInput}
+	switch mapToolKind(name) {
+	case types.ToolKindRead, types.ToolKindEdit:
+		return summarizePathToolCall(name, input, meta)
+	case types.ToolKindExecute:
+		return summarizeExecuteToolCall(name, input, meta)
+	case types.ToolKindSearch:
+		return summarizeSearchToolCall(name, input, meta)
+	default:
+		return name, meta
+	}
+}
+
+func summarizePathToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any) {
+	var payload struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return name, fallbackMeta
+	}
+
+	path := strings.TrimSpace(payload.FilePath)
+	if path == "" {
+		return name, fallbackMeta
+	}
+
+	base := strings.TrimSpace(filepath.Base(path))
+	if base == "" || base == "." || base == string(filepath.Separator) {
+		return name, fallbackMeta
+	}
+
+	return base, map[string]any{"filePath": path}
+}
+
+func summarizeExecuteToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any) {
+	var payload struct {
+		Command     string `json:"command"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return name, fallbackMeta
+	}
+
+	command := strings.TrimSpace(payload.Command)
+	if command == "" {
+		return name, fallbackMeta
+	}
+
+	meta := map[string]any{"command": command}
+	if desc := strings.TrimSpace(payload.Description); desc != "" {
+		meta["description"] = desc
+	}
+	return command, meta
+}
+
+func summarizeSearchToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any) {
+	var payload struct {
+		Pattern string `json:"pattern"`
+		Query   string `json:"query"`
+		Path    string `json:"path"`
+	}
+	if err := json.Unmarshal(input, &payload); err != nil {
+		return name, fallbackMeta
+	}
+
+	switch {
+	case strings.TrimSpace(payload.Pattern) != "":
+		return payload.Pattern, map[string]any{"pattern": payload.Pattern}
+	case strings.TrimSpace(payload.Query) != "":
+		return payload.Query, map[string]any{"query": payload.Query}
+	case strings.TrimSpace(payload.Path) != "":
+		return payload.Path, map[string]any{"path": payload.Path}
+	default:
+		return name, fallbackMeta
+	}
+}
+
+func (s *session) trackPendingToolCall(toolCall types.ToolCall) {
+	s.pendingToolMu.Lock()
+	defer s.pendingToolMu.Unlock()
+	s.pendingToolCalls = append(s.pendingToolCalls, toolCall)
+}
+
+func (s *session) toolResultUpdate(msg claudeagent.UserMessage) (types.ToolCall, bool) {
+	if msg.ToolUseResult == nil {
+		return types.ToolCall{}, false
+	}
+
+	base, ok := s.popPendingToolCall()
+	if !ok {
+		return types.ToolCall{}, false
+	}
+
+	result := summarizeToolResult(base.Kind, msg.ToolUseResult)
+	update := base
+	update.Status = "complete"
+	if result != "" {
+		update.Content = []types.ToolCallContentItem{{Type: "text", Text: result}}
+	}
+	return update, true
+}
+
+func (s *session) popPendingToolCall() (types.ToolCall, bool) {
+	s.pendingToolMu.Lock()
+	defer s.pendingToolMu.Unlock()
+
+	if len(s.pendingToolCalls) == 0 {
+		return types.ToolCall{}, false
+	}
+	toolCall := s.pendingToolCalls[0]
+	s.pendingToolCalls = s.pendingToolCalls[1:]
+	return toolCall, true
+}
+
+func summarizeToolResult(kind types.ToolKind, raw any) string {
+	switch kind {
+	case types.ToolKindExecute:
+		return summarizeExecuteToolResult(raw)
+	case types.ToolKindEdit:
+		return summarizeEditToolResult(raw)
+	default:
+		return ""
+	}
+}
+
+func summarizeExecuteToolResult(raw any) string {
+	var payload struct {
+		Stdout string `json:"stdout"`
+		Stderr string `json:"stderr"`
+	}
+	if !decodeToolResult(raw, &payload) {
+		return ""
+	}
+	if strings.TrimSpace(payload.Stdout) != "" {
+		return payload.Stdout
+	}
+	if strings.TrimSpace(payload.Stderr) != "" {
+		return payload.Stderr
+	}
+	return ""
+}
+
+func summarizeEditToolResult(raw any) string {
+	var payload struct {
+		Content string `json:"content"`
+	}
+	if !decodeToolResult(raw, &payload) {
+		return ""
+	}
+	return payload.Content
+}
+
+func decodeToolResult(raw any, out any) bool {
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return false
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return false
+	}
+	return true
 }
 
 func (s *session) emitMessageChunk(content string) {
@@ -328,16 +528,16 @@ func (s *session) emitMessageChunk(content string) {
 }
 
 func (s *session) emitToolUpdate(callID, name string) {
-	log.Printf("[agent/claude] output.tool_update session=%s tool=%s status=running", s.sessionKey, name)
+	toolCall := types.ToolCall{
+		CallID: callID,
+		Title:  name,
+		Status: "running",
+		Kind:   mapToolKind(name),
+	}
 	s.emit(types.Event{
 		Type:      types.EventTypeToolUpdate,
 		SessionID: s.SessionID(),
-		Data: types.ToolCall{
-			CallID: callID,
-			Title:  name,
-			Status: "running",
-			Kind:   mapToolKind(name),
-		},
+		Data:      toolCall,
 	})
 }
 
@@ -349,6 +549,14 @@ func (s *session) emit(event types.Event) {
 		return
 	}
 	handler(event)
+}
+
+func (s *session) logRawMessage(raw []byte) {
+	const maxRawLogBytes = 1024
+	if len(raw) > maxRawLogBytes {
+		raw = append(raw[:maxRawLogBytes], []byte("...(truncated)")...)
+	}
+	log.Printf("[agent/claude] output.raw session=%s msg=%s", s.sessionKey, string(raw))
 }
 
 func (s *session) updateSessionID(msg any) {
@@ -499,4 +707,12 @@ func preview(content string) string {
 		return trimmed
 	}
 	return trimmed[:300] + "...(truncated)"
+}
+
+func toolCallLogValue(toolCall types.ToolCall) string {
+	raw, err := json.Marshal(toolCall)
+	if err != nil {
+		return `{"marshal_error":true}`
+	}
+	return string(raw)
 }

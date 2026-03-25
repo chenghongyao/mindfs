@@ -45,6 +45,9 @@ export const ToolCallCard = memo(function ToolCallCard({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const labelKind = (kind || "").trim();
   const labelTitle = (title || "").trim();
+  const hasLocations = !!(locations && locations.length > 0);
+  const hasResult = !!result;
+  const hasDetails = hasLocations || hasResult;
   const normalizedKind = labelKind.toLowerCase();
   const icon = toolIcons[normalizedKind] || toolIcons.other;
   const label = [labelKind, labelTitle].filter(Boolean).join(" ").trim() || labelKind || labelTitle || "tool";
@@ -53,10 +56,10 @@ export const ToolCallCard = memo(function ToolCallCard({
   const isComplete = normalizedStatus === "complete" || normalizedStatus === "success";
   const isFailed = normalizedStatus === "failed" || normalizedStatus === "error";
   useEffect(() => {
-    if (!isRunning) {
+    if (!isRunning || !hasDetails) {
       setExpanded(false);
     }
-  }, [isRunning]);
+  }, [hasDetails, isRunning]);
   
   const statusColor = statusColors[normalizedStatus] || "#9ca3af";
 
@@ -73,22 +76,22 @@ export const ToolCallCard = memo(function ToolCallCard({
     >
       <button
         type="button"
-        onClick={() => setExpanded(!expanded)}
+        onClick={hasDetails ? () => setExpanded(!expanded) : undefined}
         style={{
           width: "100%",
           display: "flex",
           alignItems: "center",
           justifyContent: "flex-start",
-          padding: "8px 10px",
+          padding: "6px 8px",
           background: "none",
           border: "none",
-          cursor: "pointer",
+          cursor: hasDetails ? "pointer" : "default",
           fontSize: "12px",
-          gap: "8px",
+          gap: "6px",
           minWidth: 0,
         }}
       >
-        <span style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
           <span>{icon}</span>
           <span style={{ fontWeight: 500, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {label}
@@ -98,7 +101,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           style={{
             display: "flex",
             alignItems: "center",
-            gap: "4px",
+            gap: "3px",
             flexShrink: 0,
             whiteSpace: "nowrap",
           }}
@@ -120,30 +123,32 @@ export const ToolCallCard = memo(function ToolCallCard({
             </span>
           )}
         </span>
-        <span
-          style={{
-            flexShrink: 0,
-            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
-            transition: "transform 0.2s",
-            color: "var(--text-secondary)",
-            display: "inline-flex",
-            alignItems: "center",
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-        </span>
+        {hasDetails && (
+          <span
+            style={{
+              flexShrink: 0,
+              transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 0.2s",
+              color: "var(--text-secondary)",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </span>
+        )}
       </button>
 
-      {expanded && ((locations && locations.length > 0) || result) && (
+      {expanded && hasDetails && (
         <div
           style={{
             padding: "0 10px 10px",
             borderTop: "1px solid var(--border-color)",
           }}
         >
-          {locations && locations.length > 0 && (
+          {hasLocations && (
             <div
               style={{
                 marginTop: "8px",
@@ -155,7 +160,7 @@ export const ToolCallCard = memo(function ToolCallCard({
                 minWidth: 0,
               }}
             >
-              {locations.slice(0, 3).map((loc, idx) => (
+              {locations!.slice(0, 3).map((loc, idx) => (
                 <div
                   key={`${loc.path}-${loc.line ?? 0}-${idx}`}
                   style={{ wordBreak: "break-all", whiteSpace: "normal" }}
@@ -164,10 +169,10 @@ export const ToolCallCard = memo(function ToolCallCard({
                   {typeof loc.line === "number" ? `:${loc.line}` : ""}
                 </div>
               ))}
-              {locations.length > 3 && <div>... +{locations.length - 3} 处</div>}
+              {locations!.length > 3 && <div>... +{locations!.length - 3} 处</div>}
             </div>
           )}
-          {result && (
+          {hasResult && (
           <div
             style={{
               marginTop: "8px",

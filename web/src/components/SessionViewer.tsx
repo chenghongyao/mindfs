@@ -133,6 +133,20 @@ function normalizeMarkdownContent(content: string): string {
   return normalized;
 }
 
+function isAuxiliaryTimelineItem(item: TimelineItem | null): boolean {
+  return item?.type === "tool" || item?.type === "thought";
+}
+
+function timelineItemSpacing(previous: TimelineItem | null, current: TimelineItem): string {
+  if (!previous) {
+    return "0";
+  }
+  if (isAuxiliaryTimelineItem(previous) && isAuxiliaryTimelineItem(current)) {
+    return "6px";
+  }
+  return "16px";
+}
+
 function SessionViewerInner({ session, rootId, interactionMode = "main", onFileClick }: SessionViewerProps) {
   const [showAllFiles, setShowAllFiles] = useState(false);
   const scrollEndRef = useRef<HTMLDivElement>(null);
@@ -201,23 +215,29 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
   const hasMoreFiles = relatedFiles.length > 10;
   const displayName = session.name || session.purpose || session.key || session.session_key || "Session";
 
-  const renderTimelineItem = (item: TimelineItem, idx: number) => {
+  const renderTimelineItem = (item: TimelineItem, idx: number, spacing: string = "0") => {
     if (item.type === "thought") {
-      return <ThinkingBlock key={item.id || `thought-${idx}`} content={item.content || ""} defaultExpanded={false} />;
+      return (
+        <div style={{ marginTop: spacing }}>
+          <ThinkingBlock key={item.id || `thought-${idx}`} content={item.content || ""} defaultExpanded={false} />
+        </div>
+      );
     }
     if (item.type === "tool") {
       const tc = item.toolCall || {};
       return (
-        <ToolCallCard
-          key={item.id || tc.callId || `tool-${idx}`}
-          kind={tc.kind}
-          title={(tc as any).title || (tc.meta && typeof tc.meta.title === "string" ? (tc.meta.title as string) : "")}
-          callId={tc.callId || ""}
-          status={tc.status || "running"}
-          result={formatToolCallResult(tc)}
-          locations={tc.locations}
-          defaultExpanded={false}
-        />
+        <div style={{ marginTop: spacing }}>
+          <ToolCallCard
+            key={item.id || tc.callId || `tool-${idx}`}
+            kind={tc.kind}
+            title={(tc as any).title || (tc.meta && typeof tc.meta.title === "string" ? (tc.meta.title as string) : "")}
+            callId={tc.callId || ""}
+            status={tc.status || "running"}
+            result={formatToolCallResult(tc)}
+            locations={tc.locations}
+            defaultExpanded={false}
+          />
+        </div>
       );
     }
     const isUser = item.type === "user_text";
@@ -231,7 +251,7 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
     const userMessageWidth = imageAttachments.length > 0 ? "min(320px, 100%)" : "auto";
     const hasRichUserAttachments = imageAttachments.length > 0;
     return (
-      <div key={idx} style={{ alignSelf: isUser ? "flex-end" : "flex-start", width: isUser ? userMessageWidth : "100%", maxWidth: isUser ? "80%" : "100%", minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
+      <div key={idx} style={{ marginTop: spacing, alignSelf: isUser ? "flex-end" : "flex-start", width: isUser ? userMessageWidth : "100%", maxWidth: isUser ? "80%" : "100%", minWidth: 0, position: "relative", display: "flex", flexDirection: "column" }}>
         {isUser ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: "6px", width: userMessageWidth, maxWidth: "100%", minWidth: 0 }}>
             {hasRichUserAttachments ? (
@@ -327,10 +347,10 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
           boxSizing: "border-box",
           overflowX: "hidden",
         }}>
-          <div style={{ width: "100%", minWidth: 0, margin: "0", display: "flex", flexDirection: "column", gap: "16px" }}>
-            {timeline.map((item, idx) => renderTimelineItem(item, idx))}
+          <div style={{ width: "100%", minWidth: 0, margin: "0", display: "flex", flexDirection: "column" }}>
+            {timeline.map((item, idx) => renderTimelineItem(item, idx, timelineItemSpacing(idx > 0 ? timeline[idx - 1] : null, item)))}
             {(isAwaiting || isStreaming) && (
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>
+              <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-secondary)" }}>
                 <span style={{ width: "8px", height: "8px", borderRadius: "50%", background: "var(--accent-color)", animation: "pulse 1s infinite" }} />
                 {isStreaming ? "正在生成..." : "已发送，等待响应..."}
               </div>

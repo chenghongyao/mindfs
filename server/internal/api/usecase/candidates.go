@@ -274,6 +274,7 @@ func skillScanDirs(root rootfs.RootInfo, agent string) []string {
 	case "claude":
 		dirs := []string{
 			filepath.Join(homeDir, ".claude", "skills"),
+			filepath.Join(homeDir, ".agents", "skills"),
 			filepath.Join(rootDir, ".claude", "skills"),
 		}
 		marketplacesRoot := filepath.Join(homeDir, ".claude", "plugins", "marketplaces")
@@ -298,7 +299,9 @@ func skillScanDirs(root rootfs.RootInfo, agent string) []string {
 			filepath.Join(rootDir, ".gemini", "skills"),
 		}
 	default:
-		return nil
+		return []string{
+			filepath.Join(homeDir, ".agents", "skills"),
+		}
 	}
 }
 
