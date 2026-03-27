@@ -483,7 +483,7 @@ function getSessionMaxSeq(session: Session | null | undefined): number {
   }, 0);
 }
 
-function mergeSessionData(base: Session | null | undefined, incoming: Session | null | undefined): Session | null {
+export function mergeSessionData(base: Session | null | undefined, incoming: Session | null | undefined): Session | null {
   if (!base && !incoming) {
     return null;
   }

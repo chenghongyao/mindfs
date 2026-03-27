@@ -11,6 +11,8 @@ type BeforeInstallPromptEvent = Event & {
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
 };
 
+const PWA_INSTALL_STATE_KEY = "mindfs-pwa-installed";
+
 type FileMeta = {
   source_session?: string;
   session_name?: string;
@@ -145,6 +147,17 @@ export function FileTree({
     return isMac && isSafari;
   }, []);
 
+  const isAndroidChrome = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const ua = window.navigator.userAgent;
+    const isAndroid = /Android/i.test(ua);
+    const isChrome = /Chrome|Chromium/i.test(ua);
+    const isExcluded = /EdgA|OPR|SamsungBrowser|Firefox|QQBrowser|MQQBrowser|UCBrowser|HuaweiBrowser|MiuiBrowser|VivoBrowser|HeyTapBrowser/i.test(ua);
+    return isAndroid && isChrome && !isExcluded;
+  }, []);
+
   const isStandaloneDisplay = React.useCallback(() => {
     if (typeof window === "undefined") {
       return false;
@@ -154,13 +167,34 @@ export function FileTree({
       || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
   }, []);
 
+  const hasPersistedInstallState = React.useCallback(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    try {
+      return window.localStorage.getItem(PWA_INSTALL_STATE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const persistInstallState = React.useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(PWA_INSTALL_STATE_KEY, "true");
+    } catch {
+    }
+  }, []);
+
   React.useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
     const updateInstallState = () => {
-      const installed = isStandaloneDisplay();
+      const installed = isStandaloneDisplay() || hasPersistedInstallState();
       setIsInstalled(installed);
       setIsInstallCapable(installed || isIOS || "serviceWorker" in navigator);
     };
@@ -172,6 +206,7 @@ export function FileTree({
     };
 
     const handleInstalled = () => {
+      persistInstallState();
       setIsInstalled(true);
       setDeferredInstallPrompt(null);
     };
@@ -184,7 +219,7 @@ export function FileTree({
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
     };
-  }, [isIOS, isStandaloneDisplay]);
+  }, [hasPersistedInstallState, isIOS, isStandaloneDisplay, persistInstallState]);
 
   const installLabel = isInstalled
     ? "已安装"
@@ -192,6 +227,8 @@ export function FileTree({
       ? "添加到主屏幕"
       : isMacSafari
         ? "添加到 Dock"
+      : isAndroidChrome && !deferredInstallPrompt
+        ? "从菜单安装"
       : deferredInstallPrompt
         ? "安装应用"
         : "安装说明";
@@ -202,9 +239,14 @@ export function FileTree({
       ? "在 Safari 中用分享菜单安装"
       : isMacSafari
         ? "请用 Safari 菜单 File > Add to Dock"
+      : isAndroidChrome && !deferredInstallPrompt
+        ? "请在浏览器菜单中选择“添加到主屏幕”或“安装应用”"
       : deferredInstallPrompt
         ? "安装后可从桌面独立启动"
         : "当前浏览器未提供安装弹窗";
+
+  const shouldShowInstallButton = !isInstalled && !(isAndroidChrome && !deferredInstallPrompt);
+  const shouldShowInstallHelp = isInstalled || isIOS || isMacSafari || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt);
 
   const handleInstall = React.useCallback(async () => {
     if (isInstalled) {
@@ -215,6 +257,7 @@ export function FileTree({
       try {
         const choice = await deferredInstallPrompt.userChoice;
         if (choice.outcome === "accepted") {
+          persistInstallState();
           setIsInstalled(true);
         }
       } finally {
@@ -230,10 +273,14 @@ export function FileTree({
       window.alert("请在 Safari 菜单中选择 File > Add to Dock。该浏览器不会从网页按钮直接弹出安装窗口。");
       return;
     }
+    if (isAndroidChrome && typeof window !== "undefined") {
+      window.alert("请在 Chrome 菜单中选择“添加到主屏幕”或“安装应用”。某些移动端场景下，Chrome 不会把安装弹窗权限直接暴露给网页按钮。");
+      return;
+    }
     if (typeof window !== "undefined") {
       window.alert("当前浏览器没有提供 PWA 安装弹窗。请改用 Safari、Chrome 或 Edge 打开。");
     }
-  }, [deferredInstallPrompt, isIOS, isInstalled, isMacSafari]);
+  }, [deferredInstallPrompt, isAndroidChrome, isIOS, isInstalled, isMacSafari, persistInstallState]);
 
   React.useEffect(() => {
     if (!creatingRootName) {
@@ -533,7 +580,7 @@ export function FileTree({
           flexShrink: 0,
         }}
       >
-        {!isInstalled ? (
+        {shouldShowInstallButton ? (
           <button
             type="button"
             onClick={() => { void handleInstall(); }}
@@ -562,9 +609,11 @@ export function FileTree({
             <span>{installLabel}</span>
           </button>
         ) : null}
-        <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
-          {installHelp}
-        </div>
+        {shouldShowInstallHelp ? (
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
+            {installHelp}
+          </div>
+        ) : null}
       </div>
     </div>
   );

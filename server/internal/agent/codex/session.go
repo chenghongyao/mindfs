@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"mindfs/server/internal/agent/logs"
 	types "mindfs/server/internal/agent/types"
 
 	codexsdk "github.com/fanwenlin/codex-go-sdk/codex"
@@ -55,10 +56,11 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 		threadID = strings.TrimSpace(*id)
 	}
 	return &session{
-		client:     client,
-		thread:     thread,
-		threadID:   threadID,
-		sessionKey: opts.SessionKey,
+		client:        client,
+		thread:        thread,
+		threadID:      threadID,
+		sessionKey:    opts.SessionKey,
+		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
 	}, nil
 }
 
@@ -122,6 +124,8 @@ type session struct {
 	mu       sync.RWMutex
 	onUpdate func(types.Event)
 	turn     types.TurnCanceler
+
+	agentDebugLog *logs.AgentLogger
 }
 
 func (s *session) SendMessage(ctx context.Context, content string) error {
@@ -144,12 +148,14 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 		case *codexsdk.ThreadStartedEvent:
 			s.setThreadID(e.ThreadId)
 		case *codexsdk.ItemStartedEvent:
+			s.logRawToolItem(e.Item)
 			if toolCall, ok := mapToolItem(e.Item, true); ok {
 				s.emit(types.Event{Type: types.EventTypeToolCall, SessionID: s.SessionID(), Data: toolCall})
 				continue
 			}
 			logUnhandledEvent(s.sessionKey, "item.started", raw)
 		case *codexsdk.ItemUpdatedEvent:
+			s.logRawToolItem(e.Item)
 			if toolCall, ok := mapToolItem(e.Item, false); ok {
 				s.emit(types.Event{Type: types.EventTypeToolUpdate, SessionID: s.SessionID(), Data: toolCall})
 				continue
@@ -161,6 +167,7 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 			}
 			s.emitMessageDelta(msg, textByID)
 		case *codexsdk.ItemCompletedEvent:
+			s.logRawToolItem(e.Item)
 			if toolCall, ok := mapToolItem(e.Item, false); ok {
 				s.emit(types.Event{Type: types.EventTypeToolUpdate, SessionID: s.SessionID(), Data: toolCall})
 				continue
@@ -308,6 +315,17 @@ func (s *session) setThreadID(id string) {
 	s.mu.Unlock()
 }
 
+func (s *session) logRawToolItem(item codexsdk.ThreadItem) {
+	if s == nil || s.agentDebugLog == nil || !isToolItem(item) {
+		return
+	}
+	raw, err := json.Marshal(item)
+	if err != nil {
+		return
+	}
+	s.agentDebugLog.AppendRaw(raw)
+}
+
 func messageDelta(prev, next string) string {
 	if next == "" {
 		return ""
@@ -398,6 +416,15 @@ func mapToolItem(item codexsdk.ThreadItem, started bool) (types.ToolCall, bool) 
 		}, true
 	default:
 		return types.ToolCall{}, false
+	}
+}
+
+func isToolItem(item codexsdk.ThreadItem) bool {
+	switch item.(type) {
+	case *codexsdk.CommandExecutionItem, *codexsdk.FileChangeItem, *codexsdk.McpToolCallItem, *codexsdk.CollabToolCallItem:
+		return true
+	default:
+		return false
 	}
 }
 

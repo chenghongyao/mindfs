@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"mindfs/server/internal/agent/logs"
 	types "mindfs/server/internal/agent/types"
 
 	claudeagent "github.com/roasbeef/claude-agent-sdk-go"
@@ -71,10 +72,11 @@ func (r *Runtime) OpenSession(ctx context.Context, opts OpenOptions) (types.Sess
 	}
 
 	s := &session{
-		client:     client,
-		stream:     stream,
-		sessionID:  stream.SessionID(),
-		sessionKey: opts.SessionKey,
+		client:        client,
+		stream:        stream,
+		sessionID:     stream.SessionID(),
+		sessionKey:    opts.SessionKey,
+		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
 	}
 	go s.consumeMessages()
 	return s, nil
@@ -97,6 +99,8 @@ type session struct {
 
 	closeOnce sync.Once
 	turn      types.TurnCanceler
+
+	agentDebugLog *logs.AgentLogger
 
 	sawDelta        bool
 	sawMessageText  bool
@@ -241,9 +245,11 @@ func (s *session) consumeMessages() {
 			s.handlePartialAssistantMessage(m.Event)
 		case claudeagent.AssistantMessage:
 			s.flushAllDeltas()
+			s.logRawToolCallBlocks(raw)
 			s.handleAssistantMessage(m, s.sawDelta)
 		case claudeagent.UserMessage:
 			s.flushAllDeltas()
+			s.logRawToolResult(m)
 			s.handleUserMessage(m)
 		case claudeagent.ToolProgressMessage:
 			s.flushAllDeltas()
@@ -583,6 +589,23 @@ func (s *session) logRawMessage(raw []byte) {
 	log.Printf("[agent/claude] output.raw session=%s msg=%s", s.sessionKey, truncateRaw(raw))
 }
 
+func (s *session) logRawToolCallBlocks(raw []byte) {
+	for _, block := range extractContentBlocksByType(raw, "tool_use") {
+		s.agentDebugLog.AppendRaw(block)
+	}
+}
+
+func (s *session) logRawToolResult(msg claudeagent.UserMessage) {
+	if msg.ToolUseResult == nil {
+		return
+	}
+	raw, err := json.Marshal(msg.ToolUseResult)
+	if err != nil {
+		return
+	}
+	s.agentDebugLog.AppendRaw(raw)
+}
+
 func (s *session) updateSessionID(msg any) {
 	switch m := msg.(type) {
 	case claudeagent.SystemMessage:
@@ -723,6 +746,41 @@ func mapToolKind(name string) types.ToolKind {
 	default:
 		return types.ToolKindOther
 	}
+}
+
+func extractContentBlocksByType(raw []byte, blockType string) []json.RawMessage {
+	if len(raw) == 0 || strings.TrimSpace(blockType) == "" {
+		return nil
+	}
+	var envelope struct {
+		Message struct {
+			Content []json.RawMessage `json:"content"`
+		} `json:"message"`
+		Content []json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil
+	}
+	content := envelope.Message.Content
+	if len(content) == 0 {
+		content = envelope.Content
+	}
+	if len(content) == 0 {
+		return nil
+	}
+	out := make([]json.RawMessage, 0, len(content))
+	for _, block := range content {
+		var meta struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(block, &meta); err != nil {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(meta.Type), blockType) {
+			out = append(out, append(json.RawMessage(nil), block...))
+		}
+	}
+	return out
 }
 
 func preview(content string) string {

@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"mindfs/server/internal/agent/logs"
 	types "mindfs/server/internal/agent/types"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -58,7 +59,11 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 			return nil, err
 		}
 	}
-	return &session{proc: proc, sessionKey: opts.SessionKey}, nil
+	return &session{
+		proc:          proc,
+		sessionKey:    opts.SessionKey,
+		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
+	}, nil
 }
 
 func mapModelState(state *acpsdk.SessionModelState) types.ModelList {
@@ -215,8 +220,9 @@ func (r *Runtime) getOrCreateProcess(opts OpenOptions) (*Process, error) {
 }
 
 type session struct {
-	proc       *Process
-	sessionKey string
+	proc          *Process
+	sessionKey    string
+	agentDebugLog *logs.AgentLogger
 }
 
 func (s *session) SendMessage(ctx context.Context, content string) error {
@@ -243,6 +249,7 @@ func (s *session) CancelCurrentTurn() error {
 
 func (s *session) OnUpdate(onUpdate func(types.Event)) {
 	s.proc.SetOnUpdate(s.sessionKey, func(update SessionUpdate) {
+		s.logRawToolUpdate(update)
 		if onUpdate != nil {
 			onUpdate(convertEvent(update))
 		}
@@ -256,6 +263,20 @@ func (s *session) SessionID() string {
 func (s *session) Close() error {
 	s.proc.CloseSession(s.sessionKey)
 	return nil
+}
+
+func (s *session) logRawToolUpdate(update SessionUpdate) {
+	if s == nil || s.agentDebugLog == nil {
+		return
+	}
+	if update.Type != UpdateTypeToolCall && update.Type != UpdateTypeToolUpdate {
+		return
+	}
+	raw, err := json.Marshal(update.Raw)
+	if err != nil {
+		return
+	}
+	s.agentDebugLog.AppendRaw(raw)
 }
 
 func convertEvent(update SessionUpdate) types.Event {

@@ -63,6 +63,10 @@ function buildFileScrollKey(rootId: string | null | undefined, path: string | nu
   return `${rootId}::${path}`;
 }
 
+function hasSessionExchanges(session: Session | null | undefined): boolean {
+  return Array.isArray(session?.exchanges) && session.exchanges.length > 0;
+}
+
 function loadPersistedFileScrollPositions(): Record<string, number> {
   if (typeof window === "undefined") {
     return {};
@@ -903,7 +907,8 @@ export function App() {
     if (isMobile) setIsRightOpen(false);
     const cacheKey = rootSessionKey(targetRoot, key);
     const applySession = (fullSession: Session) => {
-      sessionCacheRef.current[cacheKey] = fullSession;
+      const normalized = { ...(fullSession as any), key } as Session;
+      sessionCacheRef.current[cacheKey] = normalized;
       setSelectedSession((prev) => {
         const prevKey = prev?.key || prev?.session_key;
         const prevRoot = (prev?.root_id as string | undefined) || currentRootIdRef.current;
@@ -912,7 +917,7 @@ export function App() {
         }
         return {
           ...(prev as any),
-          ...(fullSession as any),
+          ...(normalized as any),
           pending: typeof (prev as any)?.pending === "boolean" ? !!(prev as any).pending : preservePending,
           key,
           session_key: key,
@@ -922,7 +927,7 @@ export function App() {
       if ((boundSessionByRootRef.current[targetRoot] || null) === key) {
         const activeDrawer = drawerSessionByRootRef.current[targetRoot];
         setDrawerSessionForRoot(targetRoot, {
-          ...(fullSession as any),
+          ...(normalized as any),
           pending: activeDrawer?.key === key ? !!(activeDrawer as any)?.pending : preservePending,
         } as Session);
       }
@@ -931,6 +936,10 @@ export function App() {
     const cached = sessionCacheRef.current[cacheKey];
     if (cached) {
       applySession(cached);
+      if (hasSessionExchanges(cached)) {
+        loadedSessionRef.current[cacheKey] = true;
+        return;
+      }
     } else {
       const persisted = await getCachedSession(targetRoot, key);
       if (persisted) {
@@ -953,9 +962,7 @@ export function App() {
         });
       loadingSessionRef.current[cacheKey] = request;
       const syncResult = await request;
-      const fullSession = !syncResult.hasDelta && sessionCacheRef.current[cacheKey]
-        ? sessionCacheRef.current[cacheKey]
-        : syncResult.session;
+      const fullSession = syncResult.session;
       if (fullSession) {
         applySession(fullSession as Session);
         loadedSessionRef.current[cacheKey] = true;
@@ -983,6 +990,7 @@ export function App() {
     delete loadingSessionRef.current[cacheKey];
     delete pendingBySessionRef.current[cacheKey];
     delete cancelRequestedBySessionRef.current[cacheKey];
+    void deleteCachedSession(rootID, sessionKey);
 
     if (boundSessionByRootRef.current[rootID] === sessionKey) {
       setBoundSessionForRoot(rootID, null);
@@ -1714,16 +1722,16 @@ export function App() {
     const reloadSessionForReplay = async (rootID: string, sessionKey: string) => {
       if (!rootID || !sessionKey) return;
       const cacheKey = rootSessionKey(rootID, sessionKey);
-      if (!sessionCacheRef.current[cacheKey]) {
-        const persisted = await getCachedSession(rootID, sessionKey);
-        if (persisted && !cancelled) {
-          sessionCacheRef.current[cacheKey] = persisted;
-        }
+      delete loadedSessionRef.current[cacheKey];
+      const persisted = await getCachedSession(rootID, sessionKey);
+      if (cancelled) return;
+      if (persisted) {
+        sessionCacheRef.current[cacheKey] = { ...(persisted as any), key: sessionKey } as Session;
+      } else {
+        delete sessionCacheRef.current[cacheKey];
       }
       const syncResult = await syncSession(rootID, sessionKey);
-      const fullSession = !syncResult.hasDelta && sessionCacheRef.current[cacheKey]
-        ? sessionCacheRef.current[cacheKey]
-        : syncResult.session;
+      const fullSession = syncResult.session;
       if (!fullSession || cancelled) return;
       const normalized = { ...(fullSession as any), key: sessionKey } as Session;
       sessionCacheRef.current[cacheKey] = normalized;
