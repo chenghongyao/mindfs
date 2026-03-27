@@ -66,6 +66,7 @@ const modePlaceholders: Record<SessionMode, string> = {
 };
 
 const MOBILE_BREAKPOINT = 768;
+const IME_ENTER_GUARD_MS = 120;
 
 function useResponsive() {
   const [isMobile, setIsMobile] = useState(false);
@@ -131,6 +132,7 @@ export function ActionBar({
   const candidateItemRefs = useRef<Array<HTMLDivElement | null>>([]);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const isComposingRef = useRef(false);
+  const compositionGuardUntilRef = useRef(0);
   const { isMobile } = useResponsive();
   const isConnected = status === "Connected";
   const DRAG_THRESHOLD = -40;
@@ -341,9 +343,16 @@ export function ActionBar({
     }
   }, [currentSession?.key, cancelling, onCancelCurrentTurn]);
 
+  const isCompositionActive = useCallback((event?: KeyboardEvent | null) => {
+    const nativeEvent = event as (KeyboardEvent & { isComposing?: boolean; keyCode?: number }) | null | undefined;
+    return isComposingRef.current
+      || performance.now() < compositionGuardUntilRef.current
+      || !!nativeEvent?.isComposing
+      || nativeEvent?.keyCode === 229;
+  }, []);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
-    const nativeEvent = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
-    if (isComposingRef.current || nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+    if (isCompositionActive(e.nativeEvent)) {
       return;
     }
     if (candidates.length > 0) {
@@ -369,10 +378,10 @@ export function ActionBar({
         return;
       }
     }
-  }, [candidates, activeCandidateIndex, applyCandidate]);
+  }, [candidates, activeCandidateIndex, applyCandidate, isCompositionActive]);
 
   const handleEditorEnter = useCallback((event: KeyboardEvent | null) => {
-    if (isComposingRef.current) {
+    if (isCompositionActive(event)) {
       return false;
     }
     if (event?.shiftKey) {
@@ -391,7 +400,7 @@ export function ActionBar({
       return true;
     }
     return false;
-  }, [candidates, activeCandidateIndex, applyCandidate, handleSend, isMobile]);
+  }, [candidates, activeCandidateIndex, applyCandidate, handleSend, isCompositionActive, isMobile]);
 
   const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
@@ -492,9 +501,11 @@ export function ActionBar({
               onEnter={handleEditorEnter}
               onCompositionStart={() => {
                 isComposingRef.current = true;
+                compositionGuardUntilRef.current = 0;
               }}
               onCompositionEnd={() => {
                 isComposingRef.current = false;
+                compositionGuardUntilRef.current = performance.now() + IME_ENTER_GUARD_MS;
               }}
             />
 
