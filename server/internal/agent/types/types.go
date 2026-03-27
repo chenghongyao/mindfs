@@ -2,7 +2,6 @@ package types
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -81,23 +80,6 @@ type Event struct {
 
 type MessageChunk struct {
 	Content string `json:"content"`
-}
-
-func (mc MessageChunk) IsLowValue() bool {
-	trimmed := strings.TrimSpace(mc.Content)
-	if trimmed == "" {
-		return true
-	}
-	lines := strings.Split(trimmed, "\n")
-	if len(lines) < 4 {
-		return false
-	}
-	for _, line := range lines {
-		if strings.TrimSpace(line) != "```" {
-			return false
-		}
-	}
-	return true
 }
 
 type ThoughtChunk struct {

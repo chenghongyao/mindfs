@@ -139,26 +139,30 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 
 	textByID := map[string]string{}
 	for event := range streamed.Events {
+		raw, _ := json.Marshal(event)
 		switch e := event.(type) {
 		case *codexsdk.ThreadStartedEvent:
 			s.setThreadID(e.ThreadId)
 		case *codexsdk.ItemStartedEvent:
 			if toolCall, ok := mapToolItem(e.Item, true); ok {
-				s.emitTool(types.EventTypeToolCall, toolCall)
+				s.emit(types.Event{Type: types.EventTypeToolCall, SessionID: s.SessionID(), Data: toolCall})
+				continue
 			}
+			logUnhandledEvent(s.sessionKey, "item.started", raw)
 		case *codexsdk.ItemUpdatedEvent:
 			if toolCall, ok := mapToolItem(e.Item, false); ok {
-				s.emitTool(types.EventTypeToolUpdate, toolCall)
+				s.emit(types.Event{Type: types.EventTypeToolUpdate, SessionID: s.SessionID(), Data: toolCall})
 				continue
 			}
 			msg, ok := e.Item.(*codexsdk.AgentMessageItem)
 			if !ok {
+				logUnhandledEvent(s.sessionKey, "item.updated", raw)
 				continue
 			}
 			s.emitMessageDelta(msg, textByID)
 		case *codexsdk.ItemCompletedEvent:
 			if toolCall, ok := mapToolItem(e.Item, false); ok {
-				s.emitTool(types.EventTypeToolUpdate, toolCall)
+				s.emit(types.Event{Type: types.EventTypeToolUpdate, SessionID: s.SessionID(), Data: toolCall})
 				continue
 			}
 			msg, ok := e.Item.(*codexsdk.AgentMessageItem)
@@ -171,7 +175,9 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 				if summary != "" {
 					s.emit(types.Event{Type: types.EventTypeThoughtChunk, SessionID: s.SessionID(), Data: types.ThoughtChunk{Content: summary}})
 				}
+				continue
 			}
+			logUnhandledEvent(s.sessionKey, "item.completed", raw)
 		case *codexsdk.TurnCompletedEvent:
 			s.updateThreadIDFromThread()
 			log.Printf("[agent/codex] output.done session=%s", s.sessionKey)
@@ -182,6 +188,8 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 		case *codexsdk.ThreadErrorEvent:
 			log.Printf("[agent/codex] send.error session=%s err=%s", s.sessionKey, e.Message)
 			return errors.New("codex thread error: " + e.Message)
+		default:
+			logUnhandledEvent(s.sessionKey, "event", raw)
 		}
 	}
 
@@ -249,15 +257,6 @@ func (s *session) emitMessageDelta(msg *codexsdk.AgentMessageItem, textByID map[
 		return
 	}
 	s.emit(types.Event{Type: types.EventTypeMessageChunk, SessionID: s.SessionID(), Data: types.MessageChunk{Content: delta}})
-}
-
-func (s *session) emitTool(eventType types.EventType, toolCall types.ToolCall) {
-	logLabel := "output.tool_update"
-	if eventType == types.EventTypeToolCall {
-		logLabel = "output.tool_call"
-	}
-	log.Printf("[agent/codex] %s session=%s tool=%s status=%s raw=%s", logLabel, s.sessionKey, toolCallLabel(toolCall), toolCall.Status, toolCallLogValue(toolCall))
-	s.emit(types.Event{Type: eventType, SessionID: s.SessionID(), Data: toolCall})
 }
 
 func (s *session) emit(event types.Event) {
@@ -349,13 +348,16 @@ func mapToolItem(item codexsdk.ThreadItem, started bool) (types.ToolCall, bool) 
 	case *codexsdk.FileChangeItem:
 		status := normalizeStatus(string(v.Status), started)
 		locations := make([]types.ToolCallLocation, 0, len(v.Changes))
+		content := []types.ToolCallContentItem{}
 		for _, change := range v.Changes {
 			if strings.TrimSpace(change.Path) == "" {
 				continue
 			}
 			locations = append(locations, types.ToolCallLocation{Path: change.Path})
+			if strings.TrimSpace(change.Diff) != "" {
+				content = append(content, types.ToolCallContentItem{Type: "text", Text: change.Diff})
+			}
 		}
-		content := []types.ToolCallContentItem{}
 		if strings.TrimSpace(v.Output) != "" {
 			content = append(content, types.ToolCallContentItem{Type: "text", Text: v.Output})
 		}
@@ -442,20 +444,10 @@ func preview(content string) string {
 	return trimmed[:300] + "...(truncated)"
 }
 
-func toolCallLabel(tc types.ToolCall) string {
-	if strings.TrimSpace(tc.Title) != "" {
-		return tc.Title
+func logUnhandledEvent(sessionKey, scope string, raw []byte) {
+	const maxRawLogBytes = 1024
+	if len(raw) > maxRawLogBytes {
+		raw = append(raw[:maxRawLogBytes], []byte("...(truncated)")...)
 	}
-	if strings.TrimSpace(string(tc.Kind)) != "" {
-		return string(tc.Kind)
-	}
-	return "tool"
-}
-
-func toolCallLogValue(toolCall types.ToolCall) string {
-	raw, err := json.Marshal(toolCall)
-	if err != nil {
-		return `{"marshal_error":true}`
-	}
-	return string(raw)
+	log.Printf("[agent/codex] unhandled.%s raw=%s", scope, string(raw))
 }

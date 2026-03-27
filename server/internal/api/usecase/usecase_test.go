@@ -234,7 +234,7 @@ func TestSessionNameScore(t *testing.T) {
 		want    int
 	}{
 		{name: "empty", message: "", want: 0},
-		{name: "chinese", message: "请帮我排查会话列表刷新问题", want: 12},
+		{name: "chinese", message: "请帮我排查会话列表刷新问题", want: 13},
 		{name: "english token counts once", message: "abcdefghijkl", want: 1},
 		{name: "mixed", message: "修复 session list refresh", want: 5},
 		{name: "punctuation ignored", message: "fix, bug!", want: 2},
@@ -247,6 +247,14 @@ func TestSessionNameScore(t *testing.T) {
 				t.Fatalf("sessionNameScore(%q) = %d, want %d", tc.message, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeSessionNameCandidateOnlyCleans(t *testing.T) {
+	input := "  \"这是 一个 很长 的 标题 candidate with trailing punctuation!!!\"  "
+	want := "这是 一个 很长 的 标题 candidate with trailing punctuation"
+	if got := normalizeSessionNameCandidate(input); got != want {
+		t.Fatalf("normalizeSessionNameCandidate(%q) = %q, want %q", input, got, want)
 	}
 }
 
@@ -314,6 +322,60 @@ func TestSessionNameRunnerSkipsWithoutAgentOrPool(t *testing.T) {
 			got, err := sessionNameRunner(context.Background(), nil, "/tmp/root", tc.input)
 			if err != nil || got != "" {
 				t.Fatalf("sessionNameRunner = (%q, %v), want empty nil", got, err)
+			}
+		})
+	}
+}
+
+func TestAppendResponseChunk(t *testing.T) {
+	testCases := []struct {
+		name       string
+		current    string
+		lastType   string
+		chunk      string
+		want       string
+	}{
+		{
+			name:     "plain message append",
+			current:  "Hello",
+			lastType: string(agenttypes.EventTypeMessageChunk),
+			chunk:    " world",
+			want:     "Hello world",
+		},
+		{
+			name:     "insert separator after thought",
+			current:  "First paragraph.",
+			lastType: string(agenttypes.EventTypeThoughtChunk),
+			chunk:    "Second paragraph.",
+			want:     "First paragraph.\n\nSecond paragraph.",
+		},
+		{
+			name:     "insert separator after tool call update",
+			current:  "Result summary.",
+			lastType: string(agenttypes.EventTypeToolUpdate),
+			chunk:    "Follow-up details.",
+			want:     "Result summary.\n\nFollow-up details.",
+		},
+		{
+			name:     "keep existing trailing newline",
+			current:  "Result summary.\n",
+			lastType: string(agenttypes.EventTypeToolCall),
+			chunk:    "Follow-up details.",
+			want:     "Result summary.\nFollow-up details.",
+		},
+		{
+			name:     "no prefix on empty response",
+			current:  "",
+			lastType: string(agenttypes.EventTypeToolCall),
+			chunk:    "Fresh text.",
+			want:     "Fresh text.",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appendResponseChunk(tc.current, tc.lastType, tc.chunk); got != tc.want {
+				t.Fatalf("appendResponseChunk(%q, %q, %q) = %q, want %q", tc.current, tc.lastType, tc.chunk, got, tc.want)
 			}
 		})
 	}

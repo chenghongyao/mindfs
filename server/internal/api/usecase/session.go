@@ -208,7 +208,6 @@ type CancelSessionTurnInput struct {
 const (
 	switchContextTailLines   = 20
 	sessionNameTimeout       = 30 * time.Second
-	sessionNameMaxRunes      = 24
 	sessionNameMinMessageLen = 12
 )
 
@@ -374,7 +373,7 @@ func (s *Service) SuggestSessionName(ctx context.Context, in SuggestSessionNameI
 	if err != nil {
 		return nil, err
 	}
-	fallback := buildFallbackSessionName(in.FirstMessage)
+	fallback := BuildFallbackSessionName(in.FirstMessage)
 	if strings.TrimSpace(current.Name) != fallback {
 		return nil, nil
 	}
@@ -416,7 +415,7 @@ func (s *Service) SuggestSessionName(ctx context.Context, in SuggestSessionNameI
 	return renamed, nil
 }
 
-func buildFallbackSessionName(message string) string {
+func BuildFallbackSessionName(message string) string {
 	oneLine := strings.Join(strings.Fields(strings.TrimSpace(message)), " ")
 	if oneLine == "" {
 		return ""
@@ -449,10 +448,6 @@ func normalizeSessionNameCandidate(raw string) string {
 	cleaned = strings.Trim(cleaned, "\"'`“”‘’")
 	cleaned = strings.TrimSpace(cleaned)
 	cleaned = strings.TrimRight(cleaned, ".,;:!?，。；：！？")
-	runes := []rune(cleaned)
-	if len(runes) > sessionNameMaxRunes {
-		return strings.TrimSpace(string(runes[:sessionNameMaxRunes]))
-	}
 	return cleaned
 }
 
@@ -792,12 +787,8 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		IsInitial:     isInitial,
 	})
 	var responseText string
+	lastResponseUpdateType := ""
 	sess.OnUpdate(func(update agenttypes.Event) {
-		if update.Type == agenttypes.EventTypeMessageChunk {
-			if chunk, ok := update.Data.(agenttypes.MessageChunk); ok && chunk.IsLowValue() {
-				return
-			}
-		}
 		if update.Type == agenttypes.EventTypeToolCall || update.Type == agenttypes.EventTypeToolUpdate {
 			if toolCall, ok := update.Data.(agenttypes.ToolCall); ok && toolCall.IsWriteOperation() {
 				for _, path := range toolCall.GetAffectedPaths() {
@@ -815,8 +806,13 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 		}
 		if update.Type == agenttypes.EventTypeMessageChunk {
 			if chunk, ok := update.Data.(agenttypes.MessageChunk); ok {
-				responseText += chunk.Content
+				responseText = appendResponseChunk(responseText, lastResponseUpdateType, chunk.Content)
+				lastResponseUpdateType = string(update.Type)
 			}
+		} else if update.Type == agenttypes.EventTypeThoughtChunk ||
+			update.Type == agenttypes.EventTypeToolCall ||
+			update.Type == agenttypes.EventTypeToolUpdate {
+			lastResponseUpdateType = string(update.Type)
 		}
 		if watcher != nil {
 			watcher.MarkSessionActive(current.Key)
@@ -849,6 +845,18 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	}
 	manager.UpdateAgentState(ctx, current, in.Agent, contextLineCount(current.Exchanges))
 	return nil
+}
+
+func appendResponseChunk(responseText, lastResponseUpdateType, chunk string) string {
+	if responseText != "" &&
+		(lastResponseUpdateType == string(agenttypes.EventTypeThoughtChunk) ||
+			lastResponseUpdateType == string(agenttypes.EventTypeToolCall) ||
+			lastResponseUpdateType == string(agenttypes.EventTypeToolUpdate)) &&
+		!strings.HasSuffix(responseText, "\n\n") &&
+		!strings.HasSuffix(responseText, "\n") {
+		responseText += "\n\n"
+	}
+	return responseText + chunk
 }
 
 func (s *Service) validateAgentModel(agentName, model string) error {

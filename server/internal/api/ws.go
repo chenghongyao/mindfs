@@ -147,7 +147,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 	uc := &usecase.Service{Registry: h.AppContext}
 	sessionName := ""
 	if key == "" {
-		sessionName = buildSessionNameFromMessage(content)
+		sessionName = usecase.BuildFallbackSessionName(content)
 		created, err := uc.CreateSession(ctx, usecase.CreateSessionInput{
 			RootID: rootID,
 			Input: session.CreateInput{
@@ -314,19 +314,6 @@ func normalizeAgentErrorMessage(err error) string {
 		return strings.TrimSpace(payload.Message)
 	}
 	return raw
-}
-
-func buildSessionNameFromMessage(message string) string {
-	oneLine := strings.Join(strings.Fields(strings.TrimSpace(message)), " ")
-	if oneLine == "" {
-		return ""
-	}
-	const max = 60
-	runes := []rune(oneLine)
-	if len(runes) <= max {
-		return oneLine
-	}
-	return string(runes[:max]) + "..."
 }
 
 func getString(payload map[string]any, key string) string {

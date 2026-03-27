@@ -2,13 +2,16 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
 
-	acpsdk "github.com/coder/acp-go-sdk"
 	types "mindfs/server/internal/agent/types"
+
+	acpsdk "github.com/coder/acp-go-sdk"
 )
 
 type OpenOptions struct {
@@ -265,10 +268,14 @@ func convertEvent(update SessionUpdate) types.Event {
 	case UpdateTypeMessageChunk:
 		if raw.AgentMessageChunk != nil && raw.AgentMessageChunk.Content.Text != nil {
 			ev.Data = types.MessageChunk{Content: raw.AgentMessageChunk.Content.Text.Text}
+		} else {
+			logUnhandledConvertEvent(update, "agent_message_chunk")
 		}
 	case UpdateTypeThoughtChunk:
 		if raw.AgentThoughtChunk != nil && raw.AgentThoughtChunk.Content.Text != nil {
 			ev.Data = types.ThoughtChunk{Content: raw.AgentThoughtChunk.Content.Text.Text}
+		} else {
+			logUnhandledConvertEvent(update, "agent_thought_chunk")
 		}
 	case UpdateTypeToolCall:
 		if raw.ToolCall != nil {
@@ -289,6 +296,8 @@ func convertEvent(update SessionUpdate) types.Event {
 				Content:   convertToolCallContent(raw.ToolCall.Content),
 				Locations: locations,
 			}
+		} else {
+			logUnhandledConvertEvent(update, "tool_call")
 		}
 	case UpdateTypeToolUpdate:
 		if raw.ToolCallUpdate != nil {
@@ -316,9 +325,33 @@ func convertEvent(update SessionUpdate) types.Event {
 				Content:   convertToolCallContent(raw.ToolCallUpdate.Content),
 				Locations: locations,
 			}
+		} else {
+			logUnhandledConvertEvent(update, "tool_call_update")
 		}
+	default:
+		logUnhandledConvertEvent(update, "update_type")
 	}
 	return ev
+}
+
+func logUnhandledConvertEvent(update SessionUpdate, scope string) {
+	log.Printf(
+		"[agent/acp] unhandled.%s raw=%s",
+		scope,
+		truncateRawJSON(update.Raw),
+	)
+}
+
+func truncateRawJSON(v any) string {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return `{"marshal_error":true}`
+	}
+	const maxRawLogBytes = 1024
+	if len(raw) > maxRawLogBytes {
+		raw = append(raw[:maxRawLogBytes], []byte("...(truncated)")...)
+	}
+	return string(raw)
 }
 
 func convertToolCallContent(items []acpsdk.ToolCallContent) []types.ToolCallContentItem {

@@ -13,6 +13,7 @@ import "prismjs/components/prism-jsx";
 import "prismjs/components/prism-tsx";
 import "prismjs/components/prism-bash";
 import "prismjs/components/prism-json";
+import "prismjs/components/prism-diff";
 
 const monoFontFamily = [
   '"SFMono-Regular"',
@@ -25,6 +26,41 @@ const monoFontFamily = [
   '"Courier New"',
   'monospace',
 ].join(", ");
+
+function renderDiffCode(rawContent: string) {
+  const lines = rawContent.split("\n");
+  return lines.map((line, index) => {
+    let background = "transparent";
+    let color = "inherit";
+    if (/^\+[^+]/.test(line)) {
+      background = "rgba(34, 197, 94, 0.14)";
+      color = "#166534";
+    } else if (/^-[^-]/.test(line)) {
+      background = "rgba(239, 68, 68, 0.14)";
+      color = "#991b1b";
+    } else if (/^@@/.test(line)) {
+      background = "rgba(59, 130, 246, 0.10)";
+      color = "#1d4ed8";
+    } else if (/^(diff --git|index |--- |\+\+\+ )/.test(line)) {
+      background = "rgba(100, 116, 139, 0.10)";
+      color = "#475569";
+    }
+    return (
+      <span
+        key={`${index}-${line}`}
+        style={{
+          display: "block",
+          margin: "0 -8px",
+          padding: "0 8px",
+          background,
+          color,
+        }}
+      >
+        {line || " "}
+      </span>
+    );
+  });
+}
 
 function normalizePosixPath(input: string): string {
   const absolute = input.startsWith("/");
@@ -284,7 +320,7 @@ function MarkdownViewerInner({
             const match = /language-(\w+)/.exec(className);
             const language = match ? match[1] : "";
             let html = "";
-            if (language) {
+            if (language && language !== "diff") {
               const grammar = Prism.languages[language] ?? Prism.languages.markup;
               try {
                 html = Prism.highlight(rawContent, grammar, language);
@@ -314,7 +350,23 @@ function MarkdownViewerInner({
                   boxShadow: "none",
                 }}
               >
-                {html ? (
+                {language === "diff" ? (
+                  <code
+                    className={className}
+                    style={{
+                      display: "block",
+                      textShadow: "none",
+                      fontFamily: monoFontFamily,
+                      tabSize: 2 as any,
+                      fontVariantLigatures: "none",
+                      whiteSpace: "pre",
+                      border: "none",
+                      background: "transparent",
+                    }}
+                  >
+                    {renderDiffCode(rawContent)}
+                  </code>
+                ) : html ? (
                   <code
                     className={className}
                     dangerouslySetInnerHTML={{ __html: html }}

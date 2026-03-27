@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -23,6 +24,22 @@ const (
 	stateFileName       = "state.json"
 	defaultMaxReadBytes = 64 * 1024
 )
+
+var (
+	metaFileLocksMu sync.Mutex
+	metaFileLocks   = map[string]*sync.Mutex{}
+)
+
+func metaFileLock(path string) *sync.Mutex {
+	metaFileLocksMu.Lock()
+	defer metaFileLocksMu.Unlock()
+	if lock, ok := metaFileLocks[path]; ok {
+		return lock
+	}
+	lock := &sync.Mutex{}
+	metaFileLocks[path] = lock
+	return lock
+}
 
 type RootInfo struct {
 	ID        string    `json:"id"`
@@ -208,7 +225,33 @@ func (r RootInfo) WriteMetaFile(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(resolved, data, 0o644)
+	tmp, err := os.CreateTemp(filepath.Dir(resolved), filepath.Base(resolved)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, resolved); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
 }
 
 // Entry represents a filesystem entry for UI listings.
@@ -755,6 +798,13 @@ func (r RootInfo) UpdateFileMeta(relativePath, sessionKey, createdBy string) err
 	if relativePath == "" {
 		return errors.New("path required")
 	}
+	lockPath, err := r.resolveMetaPath("file-meta.json")
+	if err != nil {
+		return err
+	}
+	lock := metaFileLock(lockPath)
+	lock.Lock()
+	defer lock.Unlock()
 	meta, err := r.LoadFileMeta()
 	if err != nil {
 		return err
@@ -799,6 +849,13 @@ func (r RootInfo) RemoveSessionFileMeta(sessionKey string) error {
 	if strings.TrimSpace(sessionKey) == "" {
 		return errors.New("session key required")
 	}
+	lockPath, err := r.resolveMetaPath("file-meta.json")
+	if err != nil {
+		return err
+	}
+	lock := metaFileLock(lockPath)
+	lock.Lock()
+	defer lock.Unlock()
 	meta, err := r.LoadFileMeta()
 	if err != nil {
 		return err

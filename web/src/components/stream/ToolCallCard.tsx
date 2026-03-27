@@ -1,15 +1,27 @@
-import React, { memo, useEffect, useState } from "react";
-import type { ToolCallLocation } from "../../services/session";
+import React, { memo, useEffect, useMemo, useState } from "react";
+import type { ToolCallContentItem, ToolCallLocation } from "../../services/session";
+import { MarkdownViewer } from "../MarkdownViewer";
 
 type ToolCallCardProps = {
   kind?: string;
   title?: string;
   callId: string;
   status: string;
+  content?: ToolCallContentItem[];
   result?: string;
   locations?: ToolCallLocation[];
   defaultExpanded?: boolean;
 };
+
+type DetailSection =
+  | { type: "diff"; path: string; markdown: string }
+  | { type: "text"; markdown: string };
+
+function basename(path: string): string {
+  const normalized = (path || "").replace(/\\/g, "/");
+  const parts = normalized.split("/");
+  return parts[parts.length - 1] || path;
+}
 
 const toolIcons: Record<string, string> = {
   read: "📖",
@@ -38,6 +50,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   title,
   callId: _callId,
   status,
+  content,
   result,
   locations,
   defaultExpanded = false,
@@ -45,16 +58,33 @@ export const ToolCallCard = memo(function ToolCallCard({
   const [expanded, setExpanded] = useState(defaultExpanded);
   const labelKind = (kind || "").trim();
   const labelTitle = (title || "").trim();
+  const hasContent = !!(content && content.length > 0);
   const hasLocations = !!(locations && locations.length > 0);
   const hasResult = !!result;
-  const hasDetails = hasLocations || hasResult;
+  const hasDetails = hasContent || hasLocations || hasResult;
   const normalizedKind = labelKind.toLowerCase();
   const icon = toolIcons[normalizedKind] || toolIcons.other;
-  const label = [labelKind, labelTitle].filter(Boolean).join(" ").trim() || labelKind || labelTitle || "tool";
   const normalizedStatus = (status || "").toLowerCase();
+  const detailSections = useMemo(() => buildDetailSections(content, locations), [content, locations]);
+  const isFileChange =
+    normalizedKind === "edit" ||
+    normalizedKind === "delete" ||
+    normalizedKind === "move" ||
+    detailSections.some((section) => section.type === "diff");
+  const fileNames = useMemo(() => {
+    const names = detailSections
+      .filter((section): section is Extract<DetailSection, { type: "diff" }> => section.type === "diff")
+      .map((section) => basename(section.path))
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }, [detailSections]);
+  const label = isFileChange
+    ? labelKind || "edit"
+    : [labelKind, labelTitle].filter(Boolean).join(" ").trim() || labelKind || labelTitle || "tool";
   const isRunning = normalizedStatus === "running" || normalizedStatus === "in_progress";
   const isComplete = normalizedStatus === "complete" || normalizedStatus === "success";
   const isFailed = normalizedStatus === "failed" || normalizedStatus === "error";
+  const hasStructuredDetails = detailSections.length > 0;
   useEffect(() => {
     if (!isRunning || !hasDetails) {
       setExpanded(false);
@@ -68,9 +98,12 @@ export const ToolCallCard = memo(function ToolCallCard({
       style={{
         width: "100%",
         minWidth: 0,
-        borderRadius: "8px",
-        border: "1px solid var(--border-color)",
-        background: "var(--content-bg)",
+        borderRadius: "10px",
+        border: isFileChange ? "1px solid rgba(59, 130, 246, 0.22)" : "1px solid var(--border-color)",
+        background: isFileChange
+          ? "linear-gradient(180deg, rgba(59, 130, 246, 0.08), rgba(59, 130, 246, 0.03))"
+          : "var(--content-bg)",
+        boxShadow: isFileChange ? "inset 0 1px 0 rgba(255,255,255,0.35)" : "none",
         overflow: "hidden",
       }}
     >
@@ -83,7 +116,7 @@ export const ToolCallCard = memo(function ToolCallCard({
           alignItems: "center",
           justifyContent: "flex-start",
           padding: "6px 8px",
-          background: "none",
+          background: isFileChange ? "rgba(59, 130, 246, 0.04)" : "none",
           border: "none",
           cursor: hasDetails ? "pointer" : "default",
           fontSize: "12px",
@@ -96,6 +129,25 @@ export const ToolCallCard = memo(function ToolCallCard({
           <span style={{ fontWeight: 500, color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
             {label}
           </span>
+          {isFileChange ? (
+            <span
+              style={{
+                minWidth: 0,
+                padding: "1px 6px",
+                borderRadius: "999px",
+                background: "rgba(37, 99, 235, 0.10)",
+                color: "#1d4ed8",
+                fontSize: "10px",
+                fontWeight: 600,
+                letterSpacing: "0.02em",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {fileNames.join(" ")}
+            </span>
+          ) : null}
         </span>
         <span
           style={{
@@ -146,12 +198,39 @@ export const ToolCallCard = memo(function ToolCallCard({
           style={{
             padding: "0 10px 10px",
             borderTop: "1px solid var(--border-color)",
+            maxHeight: "min(60vh, 720px)",
+            overflowY: "auto",
           }}
         >
-          {hasLocations && (
+          {hasStructuredDetails ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "10px" }}>
+              {detailSections.map((section, index) => (
+                <div key={`${section.type}-${index}`} style={{ minWidth: 0 }}>
+                  {section.type === "diff" ? (
+                    <>
+                      <div
+                        style={{
+                          marginBottom: "6px",
+                          fontSize: "12px",
+                          fontWeight: 600,
+                          color: "var(--text-primary)",
+                          wordBreak: "break-all",
+                        }}
+                      >
+                        {section.path}
+                      </div>
+                      <MarkdownViewer content={section.markdown} />
+                    </>
+                  ) : (
+                    <MarkdownViewer content={section.markdown} />
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : hasLocations ? (
             <div
               style={{
-                marginTop: "8px",
+                marginTop: "10px",
                 fontSize: "11px",
                 color: "var(--text-secondary)",
                 display: "flex",
@@ -171,27 +250,8 @@ export const ToolCallCard = memo(function ToolCallCard({
               ))}
               {locations!.length > 3 && <div>... +{locations!.length - 3} 处</div>}
             </div>
-          )}
-          {hasResult && (
-          <div
-            style={{
-              marginTop: "8px",
-              padding: "8px",
-              borderRadius: "6px",
-              background: "rgba(0,0,0,0.02)",
-              fontSize: "11px",
-              fontFamily: "monospace",
-              lineHeight: 1.4,
-              color: "var(--text-secondary)",
-              whiteSpace: "pre",
-              maxHeight: "150px",
-              overflowX: "auto",
-              overflowY: "auto",
-            }}
-          >
-            {result}
-          </div>
-          )}
+          ) : null}
+          {!hasStructuredDetails && hasResult && <MarkdownViewer content={result || ""} />}
         </div>
       )}
 
@@ -204,3 +264,66 @@ export const ToolCallCard = memo(function ToolCallCard({
     </div>
   );
 });
+
+function prefixDiffLines(text: string, prefix: "+" | "-"): string[] {
+  return text.split("\n").map((line) => `${prefix}${line}`);
+}
+
+function renderStructuredDiff(path: string, oldText?: string, newText?: string): string {
+  const lines: string[] = [`--- a/${path}`, `+++ b/${path}`];
+  if (typeof oldText === "string" && oldText !== "") {
+    lines.push(...prefixDiffLines(oldText, "-"));
+  }
+  if (typeof newText === "string" && newText !== "") {
+    lines.push(...prefixDiffLines(newText, "+"));
+  }
+  return `~~~diff\n${lines.join("\n")}\n~~~`;
+}
+
+function isDiffLikeText(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  if (/^(```|~~~)/.test(trimmed)) return false;
+  return /^(diff --git|index |--- |\+\+\+ |@@ )/m.test(trimmed);
+}
+
+function extractDiffPath(text: string, fallbackPath = "(unknown)"): string {
+  const lines = text.split("\n");
+  for (const line of lines) {
+    const match = line.match(/^\+\+\+\s+(?:b\/)?(.+)$/);
+    if (match?.[1]) return match[1].trim();
+  }
+  for (const line of lines) {
+    const match = line.match(/^diff --git a\/.+ b\/(.+)$/);
+    if (match?.[1]) return match[1].trim();
+  }
+  return fallbackPath;
+}
+
+function buildDetailSections(content?: ToolCallContentItem[], locations?: ToolCallLocation[]): DetailSection[] {
+  if (!content || content.length === 0) return [];
+  const sections: DetailSection[] = [];
+  let locationIndex = 0;
+  for (const item of content) {
+    if (item.type === "diff") {
+      const path = item.path || locations?.[locationIndex]?.path || "(unknown)";
+      sections.push({ type: "diff", path, markdown: renderStructuredDiff(path, item.oldText, item.newText) });
+      locationIndex += 1;
+      continue;
+    }
+    if (item.type === "text" && item.text?.trim()) {
+      if (isDiffLikeText(item.text)) {
+        const fallbackPath = locations?.[locationIndex]?.path || "(unknown)";
+        sections.push({
+          type: "diff",
+          path: extractDiffPath(item.text, fallbackPath),
+          markdown: `~~~diff\n${item.text.trim()}\n~~~`,
+        });
+        locationIndex += 1;
+      } else {
+        sections.push({ type: "text", markdown: item.text });
+      }
+    }
+  }
+  return sections;
+}

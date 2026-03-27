@@ -99,39 +99,13 @@ const formatTime = (isoString?: string) => {
   } catch { return ""; }
 };
 
-const formatToolCallResult = (toolCall: Partial<ToolCall>): string => {
-  const content = toolCall.content;
-  const lines: string[] = [];
-  if (content && content.length > 0) {
-    for (const item of content) {
-      if (item.type === "text" && item.text) {
-        lines.push(item.text);
-        continue;
-      }
-      if (item.type === "diff") {
-        lines.push(`diff: ${item.path || "(unknown)"}`);
-        if (item.oldText) lines.push(`- ${item.oldText}`);
-        if (item.newText) lines.push(`+ ${item.newText}`);
-      }
-    }
-  }
-  const byContent = lines.join("\n").trim();
-  if (byContent) return byContent;
+const formatToolCallFallbackResult = (toolCall: Partial<ToolCall>): string => {
   const rawInput = toolCall.meta?.input;
   if (typeof rawInput === "string" && rawInput.trim() !== "") return rawInput;
   const rawOutput = toolCall.meta?.output;
   if (typeof rawOutput === "string" && rawOutput.trim() !== "") return rawOutput;
   return "";
 };
-
-function normalizeMarkdownContent(content: string): string {
-  if (!content) return "";
-  let normalized = content.replace(/([^\n])```/g, "$1\n```");
-  normalized = normalized.replace(/```(typescript|javascript|markdown|python|bash|json|tsx|jsx|yaml|shell|text|sql|yml|txt|sh|go|js|ts|md)(?=\S)/gi, "```$1\n");
-  normalized = normalized.replace(/([^\n])```/g, "$1\n```");
-  normalized = normalized.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
-  return normalized;
-}
 
 function isAuxiliaryTimelineItem(item: TimelineItem | null): boolean {
   return item?.type === "tool" || item?.type === "thought";
@@ -233,7 +207,8 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
             title={(tc as any).title || (tc.meta && typeof tc.meta.title === "string" ? (tc.meta.title as string) : "")}
             callId={tc.callId || ""}
             status={tc.status || "running"}
-            result={formatToolCallResult(tc)}
+            content={tc.content}
+            result={formatToolCallFallbackResult(tc)}
             locations={tc.locations}
             defaultExpanded={false}
           />
@@ -313,7 +288,7 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
           <div style={{ width: "100%", minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
             <div style={{ color: "var(--text-primary)", fontSize: "15px", lineHeight: "1.7", width: "100%", minWidth: 0 }}>
               <MarkdownViewer
-                content={normalizeMarkdownContent(item.content || "")}
+                content={item.content || ""}
                 onFileClick={onFileClickRef.current}
               />
             </div>

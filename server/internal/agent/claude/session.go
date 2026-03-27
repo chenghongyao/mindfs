@@ -245,18 +245,15 @@ func (s *session) consumeMessages() {
 		case claudeagent.UserMessage:
 			s.flushAllDeltas()
 			s.handleUserMessage(m)
-			s.logRawMessage(raw)
 		case claudeagent.ToolProgressMessage:
 			s.flushAllDeltas()
 			s.emitToolUpdate(m.ToolUseID, m.ToolName)
-			s.logRawMessage(raw)
 		case claudeagent.ResultMessage:
 			s.flushAllDeltas()
 			if !s.sawMessageText && strings.TrimSpace(m.Result) != "" {
 				s.emitMessageChunk(m.Result)
 			}
 			s.logRawMessage(raw)
-			log.Printf("[agent/claude] output.done session=%s status=%s subtype=%s", s.sessionKey, m.Status, m.Subtype)
 			s.emit(types.Event{Type: types.EventTypeMessageDone, SessionID: s.SessionID()})
 			s.completeTurn(resultErr(m))
 			s.sawDelta = false
@@ -271,6 +268,9 @@ func (s *session) consumeMessages() {
 
 func (s *session) handlePartialAssistantMessage(rawEvent json.RawMessage) {
 	textDelta, thinkingDelta := extractDeltas(rawEvent)
+	if textDelta == "" && thinkingDelta == "" && len(rawEvent) > 0 {
+		log.Printf("[agent/claude] output.unhandled.partial session=%s raw=%s", s.sessionKey, truncateRaw(rawEvent))
+	}
 	if thinkingDelta != "" {
 		s.flushDelta(deltaTypeText)
 		s.appendDelta(deltaTypeThinking, thinkingDelta)
@@ -321,9 +321,6 @@ func (s *session) appendDelta(kind deltaType, delta string) {
 }
 
 func (s *session) emitThoughtChunk(content string) {
-	if strings.TrimSpace(content) == "" {
-		return
-	}
 	s.emit(types.Event{
 		Type:      types.EventTypeThoughtChunk,
 		SessionID: s.SessionID(),
@@ -335,7 +332,7 @@ func (s *session) handleAssistantMessage(msg claudeagent.AssistantMessage, sawDe
 	for _, block := range msg.Message.Content {
 		switch block.Type {
 		case "text":
-			if sawDelta || strings.TrimSpace(block.Text) == "" {
+			if sawDelta {
 				continue
 			}
 			s.emitMessageChunk(block.Text)
@@ -583,11 +580,7 @@ func (s *session) emit(event types.Event) {
 }
 
 func (s *session) logRawMessage(raw []byte) {
-	const maxRawLogBytes = 1024
-	if len(raw) > maxRawLogBytes {
-		raw = append(raw[:maxRawLogBytes], []byte("...(truncated)")...)
-	}
-	log.Printf("[agent/claude] output.raw session=%s msg=%s", s.sessionKey, string(raw))
+	log.Printf("[agent/claude] output.raw session=%s msg=%s", s.sessionKey, truncateRaw(raw))
 }
 
 func (s *session) updateSessionID(msg any) {
@@ -690,7 +683,7 @@ func extractDeltas(raw json.RawMessage) (string, string) {
 	}
 	switch strings.TrimSpace(event.Delta.Type) {
 	case "text_delta":
-		if strings.TrimSpace(event.Delta.Text) != "" {
+		if event.Delta.Text != "" {
 			return event.Delta.Text, ""
 		}
 	case "thinking_delta":
@@ -698,7 +691,7 @@ func extractDeltas(raw json.RawMessage) (string, string) {
 			return "", event.Delta.Thinking
 		}
 	}
-	if strings.TrimSpace(event.Delta.Text) != "" {
+	if event.Delta.Text != "" {
 		return event.Delta.Text, ""
 	}
 	if strings.TrimSpace(event.Delta.Thinking) != "" {
@@ -744,6 +737,14 @@ func toolCallLogValue(toolCall types.ToolCall) string {
 	raw, err := json.Marshal(toolCall)
 	if err != nil {
 		return `{"marshal_error":true}`
+	}
+	return string(raw)
+}
+
+func truncateRaw(raw []byte) string {
+	const maxRawLogBytes = 1024
+	if len(raw) > maxRawLogBytes {
+		raw = append(raw[:maxRawLogBytes], []byte("...(truncated)")...)
 	}
 	return string(raw)
 }

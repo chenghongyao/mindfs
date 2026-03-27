@@ -179,16 +179,12 @@ func (c *mindfsClient) SessionUpdate(ctx context.Context, params acp.SessionNoti
 		c.proc.commands = append([]acp.AvailableCommand(nil), params.Update.AvailableCommandsUpdate.AvailableCommands...)
 		c.proc.mu.Unlock()
 	}
-	raw, _ := json.Marshal(params.Update)
-	log.Printf("[agent/acp] session.update agent=%s session_id=%s type=%s raw=%s", c.proc.agentLabel(), string(params.SessionId), internalUpdate.Type, string(raw))
+
 	if internalUpdate.Type != "" {
-		switch internalUpdate.Type {
-		case UpdateTypeToolCall, UpdateTypeToolUpdate:
-			log.Printf("[agent/acp] session.update agent=%s type=%s raw=%s", c.proc.agentLabel(), internalUpdate.Type, sessionUpdateLogValue(convertEvent(internalUpdate).Data))
-		default:
-			log.Printf("[agent/acp] session.update agent=%s type=%s", c.proc.agentLabel(), internalUpdate.Type)
-		}
 		handler(internalUpdate)
+	} else {
+		raw, _ := json.Marshal(params.Update)
+		log.Printf("[agent/acp] unhandled raw=%s", string(raw))
 	}
 	return nil
 }
@@ -307,7 +303,7 @@ func (c *mindfsClient) handleQwenSlashCommandNotification(params json.RawMessage
 	if handler == nil {
 		return nil
 	}
-	content := strings.TrimSpace(notif.Message)
+	content := notif.Message
 	if content == "" {
 		return nil
 	}

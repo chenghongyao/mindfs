@@ -96,9 +96,9 @@ func (sw *SharedFileWatcher) RecordSessionFile(sessionKey, filePath string) {
 	if sw.sessionStore == nil || sessionKey == "" || filePath == "" {
 		return
 	}
-	relPath := filePath
-	if rel, err := sw.root.NormalizePath(filePath); err == nil {
-		relPath = rel
+	relPath, err := sw.root.NormalizePath(filePath)
+	if err != nil {
+		return
 	}
 	relPath = filepath.ToSlash(relPath)
 	if relPath == "." || relPath == ".." || relPath == "" {

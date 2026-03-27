@@ -28,8 +28,8 @@ github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKs
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
 github.com/yandc/claude-agent-sdk-go v0.0.0-20260323052654-264103ad0773 h1:WQewlvyiVjCAzwXxfEtIPbL9z7c54t+rs+p3k2Rqcwc=
 github.com/yandc/claude-agent-sdk-go v0.0.0-20260323052654-264103ad0773/go.mod h1:F0UH/dW/gpCuTfWRWa2qwT18HeiYwUTSd+Q6KSFHIjo=
-github.com/yandc/codex-go-sdk v0.0.0-20260326080012-45af3045d292 h1:T4LVa+E1VwLzkqhd02fMXm4ghNAEE6Y2jRK7+dQKyGc=
-github.com/yandc/codex-go-sdk v0.0.0-20260326080012-45af3045d292/go.mod h1:YTvQqlQmaABafBpZf5dftTiLj03hBgoR8a9UTZR/TNQ=
+github.com/yandc/codex-go-sdk v0.0.0-20260327031436-dbe688474612 h1:TGs+QU01daUokxa40a1P5sm59/XOiyzXF2FmjWzdJ18=
+github.com/yandc/codex-go-sdk v0.0.0-20260327031436-dbe688474612/go.mod h1:YTvQqlQmaABafBpZf5dftTiLj03hBgoR8a9UTZR/TNQ=
 golang.org/x/mod v0.16.0 h1:QX4fJ0Rr5cPQCF7O9lh9Se4pmwfwskqZfq5moyldzic=
 golang.org/x/mod v0.16.0/go.mod h1:hTbmBsO62+eylJbnUtE2MGJUyE7QWk4xUqPFrRgJ+7c=
 golang.org/x/net v0.17.0 h1:pVaXccu2ozPjCXewfr1S7xza/zcXTity9cCdXQYSjIM=

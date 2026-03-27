@@ -23,6 +23,22 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintf(out, "Usage:\n")
+		fmt.Fprintf(out, "  mindfs [flags] [root]\n\n")
+		fmt.Fprintf(out, "Arguments:\n")
+		fmt.Fprintf(out, "  root    Directory to manage. Defaults to the current directory.\n\n")
+		fmt.Fprintf(out, "Flags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(out, "\nExamples:\n")
+		fmt.Fprintf(out, "  mindfs\n")
+		fmt.Fprintf(out, "  mindfs /path/to/project\n")
+		fmt.Fprintf(out, "  mindfs -web=false\n")
+		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
+		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
+	}
+
 	addr := flag.String("addr", ":7331", "listen address")
 	web := flag.Bool("web", true, "start web dev server")
 	webDir := flag.String("web-dir", "web", "web project directory")

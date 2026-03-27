@@ -240,6 +240,18 @@ function normalizePath(value: string): string {
   return String(value || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
 }
 
+function normalizePathForRoot(value: string, rootPath?: string): string {
+  const normalized = normalizePath(value);
+  if (!normalized) return "";
+  const normalizedRoot = normalizePath(rootPath || "");
+  if (!normalizedRoot) return normalized;
+  if (normalized === normalizedRoot) return "";
+  if (normalized.startsWith(`${normalizedRoot}/`)) {
+    return normalized.slice(normalizedRoot.length + 1);
+  }
+  return normalized;
+}
+
 function parseFileLocation(path: string): { path: string; targetLine?: number; targetColumn?: number } {
   const raw = String(path || "");
   const [base, fragment = ""] = raw.split("#", 2);
@@ -1213,7 +1225,9 @@ export function App() {
       const requestId = ++fileOpenRequestRef.current;
       const isStale = () => fileOpenRequestRef.current !== requestId;
       const parsedLocation = parseFileLocation(String(params.path || ""));
-      const path = parsedLocation.path, root = params.root || currentRootIdRef.current;
+      const root = params.root || currentRootIdRef.current;
+      const rootInfo = root ? managedRootByIdRef.current[String(root)] : undefined;
+      const path = normalizePathForRoot(parsedLocation.path, rootInfo?.root_path);
       if (!path || !root) return;
       rememberCurrentFileScroll();
       const currentFilePath = fileRef.current?.path || "";
