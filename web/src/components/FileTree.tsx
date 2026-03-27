@@ -6,6 +6,11 @@ import {
   sortDirectoryEntries,
 } from "../services/directorySort";
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
 type FileMeta = {
   source_session?: string;
   session_name?: string;
@@ -115,9 +120,120 @@ export function FileTree({
   const expandedSet = new Set(expanded);
   const managedSet = new Set(managedRoots);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = React.useState<BeforeInstallPromptEvent | null>(null);
+  const [isInstalled, setIsInstalled] = React.useState(false);
+  const [isInstallCapable, setIsInstallCapable] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
   const previousCreatingRootNameRef = React.useRef<string | null>(null);
+
+  const isIOS = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const ua = window.navigator.userAgent;
+    return /iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && "ontouchend" in document);
+  }, []);
+
+  const isMacSafari = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const ua = window.navigator.userAgent;
+    const isMac = ua.includes("Macintosh");
+    const isSafari = /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|CriOS|FxiOS/.test(ua);
+    return isMac && isSafari;
+  }, []);
+
+  const isStandaloneDisplay = React.useCallback(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    return window.matchMedia("(display-mode: standalone)").matches
+      || window.matchMedia("(display-mode: fullscreen)").matches
+      || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const updateInstallState = () => {
+      const installed = isStandaloneDisplay();
+      setIsInstalled(installed);
+      setIsInstallCapable(installed || isIOS || "serviceWorker" in navigator);
+    };
+
+    const handleBeforeInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setDeferredInstallPrompt(event as BeforeInstallPromptEvent);
+      setIsInstallCapable(true);
+    };
+
+    const handleInstalled = () => {
+      setIsInstalled(true);
+      setDeferredInstallPrompt(null);
+    };
+
+    updateInstallState();
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleInstalled);
+
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleInstalled);
+    };
+  }, [isIOS, isStandaloneDisplay]);
+
+  const installLabel = isInstalled
+    ? "已安装"
+    : isIOS
+      ? "添加到主屏幕"
+      : isMacSafari
+        ? "添加到 Dock"
+      : deferredInstallPrompt
+        ? "安装应用"
+        : "安装说明";
+
+  const installHelp = isInstalled
+    ? "当前已作为应用打开"
+    : isIOS
+      ? "在 Safari 中用分享菜单安装"
+      : isMacSafari
+        ? "请用 Safari 菜单 File > Add to Dock"
+      : deferredInstallPrompt
+        ? "安装后可从桌面独立启动"
+        : "当前浏览器未提供安装弹窗";
+
+  const handleInstall = React.useCallback(async () => {
+    if (isInstalled) {
+      return;
+    }
+    if (deferredInstallPrompt) {
+      await deferredInstallPrompt.prompt();
+      try {
+        const choice = await deferredInstallPrompt.userChoice;
+        if (choice.outcome === "accepted") {
+          setIsInstalled(true);
+        }
+      } finally {
+        setDeferredInstallPrompt(null);
+      }
+      return;
+    }
+    if (isIOS && typeof window !== "undefined") {
+      window.alert("请在 Safari 中点击“分享”按钮，然后选择“添加到主屏幕”。");
+      return;
+    }
+    if (isMacSafari && typeof window !== "undefined") {
+      window.alert("请在 Safari 菜单中选择 File > Add to Dock。该浏览器不会从网页按钮直接弹出安装窗口。");
+      return;
+    }
+    if (typeof window !== "undefined") {
+      window.alert("当前浏览器没有提供 PWA 安装弹窗。请改用 Safari、Chrome 或 Edge 打开。");
+    }
+  }, [deferredInstallPrompt, isIOS, isInstalled, isMacSafari]);
 
   React.useEffect(() => {
     if (!creatingRootName) {
@@ -406,6 +522,49 @@ export function FileTree({
       </div>
       <div style={{ padding: "8px", flex: 1, minHeight: 0, overflow: "auto" }}>
         {renderEntries(entries, 0, rootId || "")}
+      </div>
+      <div
+        style={{
+          padding: "10px 12px 12px",
+          borderTop: "1px solid var(--border-color)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "6px",
+          flexShrink: 0,
+        }}
+      >
+        {!isInstalled ? (
+          <button
+            type="button"
+            onClick={() => { void handleInstall(); }}
+            style={{
+              width: "100%",
+              border: "1px solid var(--border-color)",
+              background: "var(--text-primary)",
+              color: "var(--sidebar-bg)",
+              borderRadius: "10px",
+              padding: "10px 12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              cursor: "pointer",
+              fontSize: "12px",
+              fontWeight: 600,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 16V4" />
+              <path d="m7 9 5-5 5 5" />
+              <path d="M20 16.5v1.5A2 2 0 0 1 18 20H6a2 2 0 0 1-2-2v-1.5" />
+            </svg>
+            <span>{installLabel}</span>
+          </button>
+        ) : null}
+        <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
+          {installHelp}
+        </div>
       </div>
     </div>
   );
