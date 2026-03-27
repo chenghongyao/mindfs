@@ -30,6 +30,7 @@ type SessionItem = {
 type SessionViewerProps = {
   session: SessionItem | null;
   rootId?: string | null;
+  rootPath?: string | null;
   interactionMode?: "main" | "drawer";
   onFileClick?: (path: string) => void;
 };
@@ -121,7 +122,7 @@ function timelineItemSpacing(previous: TimelineItem | null, current: TimelineIte
   return "16px";
 }
 
-function SessionViewerInner({ session, rootId, interactionMode = "main", onFileClick }: SessionViewerProps) {
+function SessionViewerInner({ session, rootId, rootPath, interactionMode = "main", onFileClick }: SessionViewerProps) {
   const [showAllFiles, setShowAllFiles] = useState(false);
   const scrollEndRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -210,6 +211,7 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
             content={tc.content}
             result={formatToolCallFallbackResult(tc)}
             locations={tc.locations}
+            rootPath={rootPath || undefined}
             defaultExpanded={false}
           />
         </div>
@@ -365,5 +367,6 @@ function SessionViewerInner({ session, rootId, interactionMode = "main", onFileC
 export const SessionViewer = memo(SessionViewerInner, (prev, next) => (
   prev.session === next.session &&
   prev.rootId === next.rootId &&
+  prev.rootPath === next.rootPath &&
   prev.interactionMode === next.interactionMode
 ));

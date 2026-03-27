@@ -2180,6 +2180,7 @@ export function App() {
     <SessionViewer
       session={selectedSessionSnapshot}
       rootId={selectedSession?.root_id || currentRootId}
+      rootPath={managedRootByIdRef.current[selectedSession?.root_id || currentRootId || ""]?.root_path || null}
       onFileClick={handleSelectedSessionFileClick}
     />
   );
@@ -2395,7 +2396,7 @@ export function App() {
         setInteractionMode("drawer");
         setDrawerOpenForRoot(rootID, !(drawerOpenByRootRef.current[rootID || ""] || false));
       }} />}
-      drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{drawerSessionSnapshot ? <SessionViewer session={drawerSessionSnapshot} rootId={currentRootId} interactionMode="drawer" onFileClick={handleDrawerSessionFileClick} /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
+      drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{drawerSessionSnapshot ? <SessionViewer session={drawerSessionSnapshot} rootId={currentRootId} rootPath={managedRootByIdRef.current[currentRootId || ""]?.root_path || null} interactionMode="drawer" onFileClick={handleDrawerSessionFileClick} /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
     />
   );
 }

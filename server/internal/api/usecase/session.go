@@ -789,6 +789,7 @@ func (s *Service) SendMessage(ctx context.Context, in SendMessageInput) error {
 	var responseText string
 	lastResponseUpdateType := ""
 	sess.OnUpdate(func(update agenttypes.Event) {
+		update = normalizeAgentUpdatePaths(root, update)
 		if update.Type == agenttypes.EventTypeToolCall || update.Type == agenttypes.EventTypeToolUpdate {
 			if toolCall, ok := update.Data.(agenttypes.ToolCall); ok && toolCall.IsWriteOperation() {
 				for _, path := range toolCall.GetAffectedPaths() {
@@ -857,6 +858,124 @@ func appendResponseChunk(responseText, lastResponseUpdateType, chunk string) str
 		responseText += "\n\n"
 	}
 	return responseText + chunk
+}
+
+type pathNormalizer interface {
+	NormalizePath(string) (string, error)
+}
+
+func normalizeAgentUpdatePaths(root pathNormalizer, update agenttypes.Event) agenttypes.Event {
+	if root == nil {
+		return update
+	}
+	toolCall, ok := update.Data.(agenttypes.ToolCall)
+	if !ok {
+		return update
+	}
+
+	for i := range toolCall.Locations {
+		toolCall.Locations[i].Path = normalizeToolPath(root, toolCall.Locations[i].Path)
+	}
+	for i := range toolCall.Content {
+		toolCall.Content[i].Path = normalizeToolPath(root, toolCall.Content[i].Path)
+		if toolCall.Content[i].Type == "text" {
+			toolCall.Content[i].Text = normalizeDiffTextPaths(root, toolCall.Content[i].Text)
+		}
+	}
+	if toolCall.Meta != nil {
+		if filePath, ok := toolCall.Meta["filePath"].(string); ok {
+			toolCall.Meta["filePath"] = normalizeToolPath(root, filePath)
+		}
+		if path, ok := toolCall.Meta["path"].(string); ok {
+			toolCall.Meta["path"] = normalizeToolPath(root, path)
+		}
+	}
+	update.Data = toolCall
+	return update
+}
+
+func normalizeToolPath(root pathNormalizer, path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	normalized, err := root.NormalizePath(path)
+	if err != nil {
+		return path
+	}
+	return normalized
+}
+
+func normalizeDiffTextPaths(root pathNormalizer, text string) string {
+	if strings.TrimSpace(text) == "" {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	changed := false
+	for i, line := range lines {
+		next, ok := normalizeDiffLine(root, line)
+		if !ok || next == line {
+			continue
+		}
+		lines[i] = next
+		changed = true
+	}
+	if !changed {
+		return text
+	}
+	return strings.Join(lines, "\n")
+}
+
+func normalizeDiffLine(root pathNormalizer, line string) (string, bool) {
+	switch {
+	case strings.HasPrefix(line, "diff --git "):
+		rest := strings.TrimPrefix(line, "diff --git ")
+		parts := strings.SplitN(rest, " ", 2)
+		if len(parts) != 2 {
+			return line, false
+		}
+		left, leftOK := normalizeDiffRef(root, parts[0])
+		right, rightOK := normalizeDiffRef(root, parts[1])
+		if !leftOK && !rightOK {
+			return line, false
+		}
+		return "diff --git " + left + " " + right, true
+	case strings.HasPrefix(line, "--- "):
+		next, ok := normalizeDiffRef(root, strings.TrimPrefix(line, "--- "))
+		if !ok {
+			return line, false
+		}
+		return "--- " + next, true
+	case strings.HasPrefix(line, "+++ "):
+		next, ok := normalizeDiffRef(root, strings.TrimPrefix(line, "+++ "))
+		if !ok {
+			return line, false
+		}
+		return "+++ " + next, true
+	default:
+		return line, false
+	}
+}
+
+func normalizeDiffRef(root pathNormalizer, ref string) (string, bool) {
+	trimmed := strings.TrimSpace(ref)
+	if trimmed == "" || trimmed == "/dev/null" {
+		return ref, false
+	}
+
+	prefix := ""
+	path := trimmed
+	switch {
+	case strings.HasPrefix(trimmed, "a/"), strings.HasPrefix(trimmed, "b/"):
+		prefix = trimmed[:2]
+		path = trimmed[2:]
+	}
+
+	normalized := normalizeToolPath(root, path)
+	if normalized == path || normalized == "" {
+		return ref, false
+	}
+	return prefix + normalized, true
 }
 
 func (s *Service) validateAgentModel(agentName, model string) error {

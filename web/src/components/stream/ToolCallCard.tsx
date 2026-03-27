@@ -10,6 +10,7 @@ type ToolCallCardProps = {
   content?: ToolCallContentItem[];
   result?: string;
   locations?: ToolCallLocation[];
+  rootPath?: string;
   defaultExpanded?: boolean;
 };
 
@@ -53,6 +54,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   content,
   result,
   locations,
+  rootPath,
   defaultExpanded = false,
 }: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -65,7 +67,7 @@ export const ToolCallCard = memo(function ToolCallCard({
   const normalizedKind = labelKind.toLowerCase();
   const icon = toolIcons[normalizedKind] || toolIcons.other;
   const normalizedStatus = (status || "").toLowerCase();
-  const detailSections = useMemo(() => buildDetailSections(content, locations), [content, locations]);
+  const detailSections = useMemo(() => buildDetailSections(content, locations, rootPath), [content, locations, rootPath]);
   const isFileChange =
     normalizedKind === "edit" ||
     normalizedKind === "delete" ||
@@ -244,7 +246,7 @@ export const ToolCallCard = memo(function ToolCallCard({
                   key={`${loc.path}-${loc.line ?? 0}-${idx}`}
                   style={{ wordBreak: "break-all", whiteSpace: "normal" }}
                 >
-                  {loc.path}
+                  {normalizeDisplayPath(loc.path, rootPath)}
                   {typeof loc.line === "number" ? `:${loc.line}` : ""}
                 </div>
               ))}
@@ -300,23 +302,38 @@ function extractDiffPath(text: string, fallbackPath = "(unknown)"): string {
   return fallbackPath;
 }
 
-function buildDetailSections(content?: ToolCallContentItem[], locations?: ToolCallLocation[]): DetailSection[] {
+function normalizeDisplayPath(path: string, rootPath?: string): string {
+  const normalizedPath = (path || "").replace(/\\/g, "/").trim();
+  const normalizedRoot = (rootPath || "").replace(/\\/g, "/").replace(/\/+$/g, "").trim();
+  if (!normalizedPath || !normalizedRoot) {
+    return path;
+  }
+  if (normalizedPath === normalizedRoot) {
+    return ".";
+  }
+  if (normalizedPath.startsWith(`${normalizedRoot}/`)) {
+    return normalizedPath.slice(normalizedRoot.length + 1);
+  }
+  return path;
+}
+
+function buildDetailSections(content?: ToolCallContentItem[], locations?: ToolCallLocation[], rootPath?: string): DetailSection[] {
   if (!content || content.length === 0) return [];
   const sections: DetailSection[] = [];
   let locationIndex = 0;
   for (const item of content) {
     if (item.type === "diff") {
-      const path = item.path || locations?.[locationIndex]?.path || "(unknown)";
+      const path = normalizeDisplayPath(item.path || locations?.[locationIndex]?.path || "(unknown)", rootPath);
       sections.push({ type: "diff", path, markdown: renderStructuredDiff(path, item.oldText, item.newText) });
       locationIndex += 1;
       continue;
     }
     if (item.type === "text" && item.text?.trim()) {
       if (isDiffLikeText(item.text)) {
-        const fallbackPath = locations?.[locationIndex]?.path || "(unknown)";
+        const fallbackPath = normalizeDisplayPath(locations?.[locationIndex]?.path || "(unknown)", rootPath);
         sections.push({
           type: "diff",
-          path: extractDiffPath(item.text, fallbackPath),
+          path: normalizeDisplayPath(extractDiffPath(item.text, fallbackPath), rootPath),
           markdown: `~~~diff\n${item.text.trim()}\n~~~`,
         });
         locationIndex += 1;
