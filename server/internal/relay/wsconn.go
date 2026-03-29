@@ -108,7 +108,7 @@ func bridgeWebSocketToStream(localConn *websocket.Conn, stream io.Writer, errCh 
 				closeCode = closeErr.Code
 				closeText = closeErr.Text
 			}
-			_ = writeWSCloseFrame(stream, closeCode, closeText)
+			_ = writeWSCloseFrame(stream, sanitizeWSCloseCode(closeCode), closeText)
 			errCh <- nil
 			return
 		}
@@ -138,6 +138,7 @@ func bridgeStreamToWebSocket(stream io.Reader, localConn *websocket.Conn, errCh 
 				return
 			}
 		case wsFrameClose:
+			closeCode = sanitizeWSCloseCode(closeCode)
 			_ = localConn.WriteControl(
 				websocket.CloseMessage,
 				websocket.FormatCloseMessage(closeCode, closeText),
@@ -219,5 +220,14 @@ func readWSFrame(r io.Reader) (frameType byte, opcode int, payload []byte, close
 		return wsFrameClose, 0, nil, closeCode, string(reason), nil
 	default:
 		return 0, 0, nil, 0, "", errors.New("unknown_ws_frame")
+	}
+}
+
+func sanitizeWSCloseCode(code int) int {
+	switch code {
+	case websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure, websocket.CloseTLSHandshake:
+		return websocket.CloseNormalClosure
+	default:
+		return code
 	}
 }

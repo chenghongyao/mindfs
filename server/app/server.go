@@ -13,8 +13,9 @@ import (
 )
 
 type StartOptions struct {
-	StaticDir string
-	BindCode  string
+	StaticDir    string
+	NoRelayer    bool
+	RelayBaseURL string
 }
 
 // Start boots the HTTP/WS server.
@@ -30,6 +31,10 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 	agentConfig, err := agent.LoadConfig("")
 	if err != nil {
 		return err
+	}
+	relayBaseURL := opts.RelayBaseURL
+	if relayBaseURL == "" {
+		relayBaseURL = agentConfig.RelayBaseURL
 	}
 	agentPool := agent.NewPool(agentConfig)
 	agentProber := agent.NewProber(&agentConfig, agentPool, 5*time.Minute)
@@ -58,7 +63,7 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	relayMgr, err := relay.NewManager(addr, opts.BindCode)
+	relayMgr, err := relay.NewManager(addr, opts.NoRelayer, relayBaseURL)
 	if err != nil {
 		return err
 	}

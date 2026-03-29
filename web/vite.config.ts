@@ -39,6 +39,15 @@ const OFFLINE_URL = new URL("./offline.html", self.location.href).toString();
 const INDEX_URL = new URL("./index.html", self.location.href).toString();
 const PRECACHE_URLS = ${JSON.stringify(precacheUrls, null, 2)};
 
+function normalizedPathname(pathname) {
+  const relayPrefixMatch = pathname.match(/^\\/n\\/[^/]+(?=\\/|$)/);
+  if (!relayPrefixMatch) {
+    return pathname;
+  }
+  const normalized = pathname.slice(relayPrefixMatch[0].length);
+  return normalized || "/";
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(SHELL_CACHE);
@@ -67,7 +76,8 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) {
     return;
   }
-  if (url.pathname.startsWith("/api/") || url.pathname === "/api" || url.pathname === "/ws" || url.pathname === "/health") {
+  const pathname = normalizedPathname(url.pathname);
+  if (pathname.startsWith("/api/") || pathname === "/api" || pathname === "/ws" || pathname === "/health") {
     return;
   }
 
@@ -126,7 +136,10 @@ async function handleStaticRequest(request) {
         return iconResponse;
       }
     }
-    throw new Error("asset unavailable");
+    return new Response("", {
+      status: 504,
+      statusText: "Asset Unavailable",
+    });
   }
 }
 

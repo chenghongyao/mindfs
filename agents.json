@@ -1,4 +1,5 @@
 {
+  "relayBaseURL": "https://relay.mindfs.com",
   "agents": [
     {
       "name": "gemini",

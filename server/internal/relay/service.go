@@ -2,7 +2,6 @@ package relay
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,13 +30,25 @@ type Service struct {
 	client    *http.Client
 }
 
-type activationResponse struct {
+type credentialResponse struct {
 	DeviceToken string `json:"device_token"`
 	NodeID      string `json:"node_id"`
 	Endpoint    string `json:"endpoint"`
 }
 
-func NewService(localAddr, _ string) (*Service, error) {
+type bindPollResponse struct {
+	Status          string `json:"status"`
+	NextPollAfterMS int64  `json:"next_poll_after_ms"`
+	credentialResponse
+}
+
+type BindPollResult struct {
+	Status        string
+	NextPollAfter time.Duration
+	Credentials   RelayCredentials
+}
+
+func NewService(localAddr string) (*Service, error) {
 	store, err := NewCredentialsStore()
 	if err != nil {
 		return nil, err
@@ -83,60 +94,67 @@ func (s *Service) Run(ctx context.Context) error {
 	}
 }
 
-func (s *Service) Bind(ctx context.Context, bindCode string) (Credentials, error) {
-	creds, err := s.store.Load()
+func (s *Service) PollBind(ctx context.Context, baseURL, pendingCode string) (BindPollResult, error) {
+	pollURL, err := buildBindPollURL(baseURL, pendingCode)
 	if err != nil {
-		return Credentials{}, err
+		return BindPollResult{}, err
 	}
-	bind, err := ParseBindCode(strings.TrimSpace(bindCode), creds)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
 	if err != nil {
-		return Credentials{}, err
+		return BindPollResult{}, err
 	}
-	activated, err := s.activate(ctx, bind)
-	if err != nil {
-		return Credentials{}, err
-	}
-	creds = Credentials{Relay: activated}
-	if err := s.store.Save(creds); err != nil {
-		return Credentials{}, err
-	}
-	return creds, nil
-}
-
-func (s *Service) activate(ctx context.Context, bind BindCode) (RelayCredentials, error) {
-	activateURL, err := buildActivateURL(bind.BaseURL)
-	if err != nil {
-		return RelayCredentials{}, err
-	}
-	body, err := json.Marshal(map[string]string{"activation_token": bind.ActivationToken})
-	if err != nil {
-		return RelayCredentials{}, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, activateURL, bytes.NewReader(body))
-	if err != nil {
-		return RelayCredentials{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return RelayCredentials{}, err
+		return BindPollResult{}, err
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return RelayCredentials{}, fmt.Errorf("relay activation failed: %s %s", resp.Status, strings.TrimSpace(string(payload)))
+		return BindPollResult{}, fmt.Errorf("relay bind poll failed: %s %s", resp.Status, strings.TrimSpace(string(payload)))
 	}
 
-	var out activationResponse
+	var out bindPollResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return RelayCredentials{}, err
+		return BindPollResult{}, err
 	}
-	return RelayCredentials{
-		DeviceToken: strings.TrimSpace(out.DeviceToken),
-		NodeID:      strings.TrimSpace(out.NodeID),
-		Endpoint:    strings.TrimSpace(out.Endpoint),
-	}, nil
+	result := BindPollResult{
+		Status:        strings.TrimSpace(out.Status),
+		NextPollAfter: time.Duration(out.NextPollAfterMS) * time.Millisecond,
+	}
+	if result.Status == "confirmed" {
+		result.Credentials = RelayCredentials{
+			DeviceToken: strings.TrimSpace(out.DeviceToken),
+			NodeID:      strings.TrimSpace(out.NodeID),
+			Endpoint:    strings.TrimSpace(out.Endpoint),
+		}
+	}
+	return result, nil
+}
+
+func buildBindPollURL(baseURL, pendingCode string) (string, error) {
+	baseURL = strings.TrimSuffix(strings.TrimSpace(baseURL), "/")
+	pendingCode = strings.TrimSpace(pendingCode)
+	if baseURL == "" {
+		return "", errors.New("relay base URL required")
+	}
+	if pendingCode == "" {
+		return "", errors.New("pending code required")
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	switch u.Scheme {
+	case "http", "https":
+		u.Path = strings.TrimSuffix(u.Path, "/") + "/api/bind/poll"
+		q := u.Query()
+		q.Set("code", pendingCode)
+		u.RawQuery = q.Encode()
+		u.Fragment = ""
+		return u.String(), nil
+	default:
+		return "", fmt.Errorf("unsupported relay base URL scheme: %s", u.Scheme)
+	}
 }
 
 func (s *Service) runSession(ctx context.Context, creds RelayCredentials) error {

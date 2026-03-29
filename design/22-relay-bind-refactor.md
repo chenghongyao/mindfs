@@ -139,8 +139,44 @@ GET /api/relay/status
 
 - 文件树底部增加“绑定 relayer”或“打开 relayer”按钮
 - 按钮所需的 `pending_code/node_id/relay_base_url` 都来自 `/api/relay/status`
+- 点击“绑定 relayer”时，跳转到：
 
-### 4.4 relayer 接口
+```text
+https://relay.mindfs.com/bind?code=<pending_code>&root=<root_id>
+```
+
+- `root` 只用于页面返回或展示上下文，不参与 relayer 侧绑定判定
+
+### 4.4 页面 URL 带 `pending_code` 时的逻辑
+
+localhost 页面：
+
+- localhost 页面本身不消费 URL 里的 `pending_code`
+- `pending_code` 只从 `/api/relay/status` 获取
+- localhost 的职责只是发起跳转
+
+relayer 页面：
+
+- 当用户访问 `/bind?code=<pending_code>&root=<root_id>` 时，页面读取 `code`
+- 如果用户未登录，先进入登录流程；登录完成后回到当前 `/bind?...` 页面
+- 如果 `code` 缺失或格式非法，页面直接显示错误
+- 如果 `code` 存在，页面展示确认卡片
+- 用户点击确认后，前端调用 `POST /api/bind/confirm`
+- 确认成功后，页面跳转到：
+
+```text
+/n/<node_id>?root=<root_id>
+```
+
+- 如果 `root` 缺失，则跳转到：
+
+```text
+/n/<node_id>
+```
+
+- 页面不直接发 `device_token` 给浏览器；`device_token` 只由本地 server 通过 `poll` 获取
+
+### 4.5 relayer 接口
 
 relayer 侧新增：
 
@@ -166,6 +202,33 @@ POST /api/bind/confirm
   "endpoint": "wss://relay.mindfs.com/ws/connector"
 }
 ```
+
+### 4.6 `../mindfs-relayer` 侧修改
+
+按当前 `../mindfs-relayer` 代码结构，主要改这几处：
+
+- `server/internal/app/app.go`
+  - 新增 `GET /api/bind/poll`
+  - 新增 `POST /api/bind/confirm`
+  - `POST /api/activate` 删除
+
+- `server/internal/controlplane/handler.go`
+  - 删除 `HandleActivate`
+  - 新增 `HandleBindPoll`
+  - 新增 `HandleBindConfirm`
+  - 生成 `device_token/node_id/endpoint` 的返回结构保持不变
+
+- `server/internal/store`
+  - 保留现有 `activation_tokens`、`device_tokens`
+  - 新增 `pending_codes` 的读写
+  - `confirm` 把 `pending_code` 标记为 `confirmed`
+  - `poll` 在 `confirmed` 时签发或返回 `device_token`
+
+复用原则：
+
+- `SaveDeviceToken()`、`GetActiveDeviceTokenByNode()` 继续复用
+- `connectorEndpoint()` 继续复用
+- 只是把“发 token 的触发点”从 `activate` 改到 `poll(confirmed)`
 
 ---
 
@@ -227,6 +290,7 @@ http://localhost:7331/?root=<root_id>
 - 轮询成功后能落盘 `device_token`
 - 已有凭证时直接连接 relay
 - `/api/relay/status` 能返回 `pending_code/relay_bound/node_id/relay_base_url`
+- `../mindfs-relayer` 的 `confirm/poll` 能正确驱动 `pending -> confirmed -> claimed`
 
 ---
 

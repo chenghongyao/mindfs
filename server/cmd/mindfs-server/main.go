@@ -14,7 +14,7 @@ import (
 func main() {
 	addr := flag.String("addr", ":7331", "listen address")
 	staticDir := flag.String("static-dir", "web/dist", "directory for serving built web assets")
-	bindCode := flag.String("bind-code", "", "relay bind code for activation/binding")
+	noRelayer := flag.Bool("no-relayer", false, "disable relay integration")
 	flag.Parse()
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -22,7 +22,7 @@ func main() {
 
 	if err := app.Start(ctx, *addr, app.StartOptions{
 		StaticDir: *staticDir,
-		BindCode:  *bindCode,
+		NoRelayer: *noRelayer,
 	}); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)

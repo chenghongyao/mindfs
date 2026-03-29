@@ -1,4 +1,5 @@
 {
+  "relayBaseURL": "https://relay.example.com",
   "agents": [
     {
       "name": "gemini",

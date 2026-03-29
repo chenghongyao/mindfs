@@ -12,7 +12,7 @@ import {
 } from "./services/directorySort";
 import { uploadFiles } from "./services/upload";
 import { PluginManager, loadAllPlugins, type PluginInput } from "./plugins/manager";
-import { appPath, appURL } from "./services/base";
+import { appPath, appURL, isRelayNodePage } from "./services/base";
 
 // 直接导入标准组件
 import { AppShell } from "./layout/AppShell";
@@ -49,6 +49,16 @@ type ManagedRootPayload = {
   root_path?: string;
   size?: number;
   mtime?: string;
+};
+type RelayStatusPayload = {
+  relay_bound?: boolean;
+  no_relayer?: boolean;
+  pending_code?: string;
+  node_name?: string;
+  node_id?: string;
+  relay_base_url?: string;
+  node_url?: string;
+  last_error?: string;
 };
 const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 const TREE_SORT_STORAGE_KEY = "mindfs-tree-sort-mode";
@@ -391,6 +401,7 @@ export function App() {
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [creatingRootName, setCreatingRootName] = useState<string | null>(null);
   const [creatingRootBusy, setCreatingRootBusy] = useState(false);
+  const [relayStatus, setRelayStatus] = useState<RelayStatusPayload | null>(null);
   const [entriesByPath, setEntriesByPath] = useState<Record<string, FileEntry[]>>({});
   const entriesByPathRef = useRef<Record<string, FileEntry[]>>({});
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -1459,6 +1470,23 @@ export function App() {
     await actionHandlersRef.current.open_dir({ path: nextRoot, root: nextRoot, preservePluginQuery: true, isRoot: true });
   }, [replaceURLState]);
 
+  const refreshRelayStatus = useCallback(async () => {
+    if (typeof window !== "undefined" && isRelayNodePage()) {
+      return;
+    }
+    try {
+      const response = await fetch("/api/relay/status");
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json() as RelayStatusPayload;
+      setRelayStatus(payload);
+      return payload;
+    } catch {
+      return;
+    }
+  }, []);
+
   const handleCreateRootStart = useCallback(() => {
     if (creatingRootBusy) {
       return;
@@ -2029,6 +2057,7 @@ export function App() {
     didInitRef.current = true;
     let cancelled = false;
     fetch(appPath("/api/dirs")).then(r => r.json()).then(async dirs => {
+      void refreshRelayStatus();
       if (cancelled || !dirs.length) return;
       const nextDirs = dirs as ManagedRootPayload[];
       const ids = nextDirs.map((d) => d.id);
@@ -2051,7 +2080,7 @@ export function App() {
       }
     });
     return () => { cancelled = true; };
-  }, [ensurePluginsLoaded]);
+  }, [ensurePluginsLoaded, refreshRelayStatus]);
 
   useEffect(() => {
     function handlePopState() {
@@ -2380,11 +2409,57 @@ export function App() {
     });
   }, [file, actionHandlers]);
 
+  const handleRelayAction = useCallback(async () => {
+    if (!currentRootId) {
+      return;
+    }
+    const latestStatus = await refreshRelayStatus();
+    const nextStatus = latestStatus || relayStatus;
+    if (!nextStatus) {
+      return;
+    }
+    const nodeURL = String(nextStatus?.node_url || "");
+    if (nextStatus?.relay_bound && nodeURL) {
+      const target = new URL(nodeURL, window.location.origin);
+      target.searchParams.set("root", currentRootId);
+      window.open(target.toString(), "_blank", "noopener,noreferrer");
+      return;
+    }
+    const pendingCode = String(nextStatus?.pending_code || "");
+    const nodeName = String(nextStatus?.node_name || "");
+    const relayBaseURL = String(nextStatus?.relay_base_url || "");
+    if (!pendingCode || !relayBaseURL) {
+      return;
+    }
+    const target = new URL("/bind", relayBaseURL);
+    target.searchParams.set("code", pendingCode);
+    target.searchParams.set("root", currentRootId);
+    if (nodeName) {
+      target.searchParams.set("node_name", nodeName);
+    }
+    window.open(target.toString(), "_blank", "noopener,noreferrer");
+  }, [currentRootId, refreshRelayStatus, relayStatus]);
+
+  const relayActionLabel = useMemo(() => {
+    if (isRelayNodePage()) {
+      return null;
+    }
+    if (relayStatus?.no_relayer) {
+      return null;
+    }
+    if (relayStatus?.relay_bound) {
+      return "打开 Relayer";
+    }
+    return "绑定 Relayer";
+  }, [relayStatus]);
+
+  const relayActionDisabled = !currentRootId || (!relayStatus?.relay_bound && (!relayStatus?.pending_code || !relayStatus?.relay_base_url));
+
   return (
     <AppShell
       leftOpen={isLeftOpen} rightOpen={isRightOpen}
       onCloseLeft={() => setIsLeftOpen(false)} onCloseRight={() => setIsRightOpen(false)}
-      sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} showHiddenFiles={showHiddenFiles} onSortModeChange={setTreeSortMode} onShowHiddenFilesChange={setShowHiddenFiles} selectedDirKey={selectedDirKey} selectedPath={file?.path} rootId={currentRootId} creatingRootName={creatingRootName} creatingRootBusy={creatingRootBusy} onCreateRootStart={handleCreateRootStart} onCreateRootNameChange={setCreatingRootName} onCreateRootSubmit={() => { void handleCreateRootSubmit(); }} onCreateRootCancel={handleCreateRootCancel} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true, isRoot: e.is_root === true})} />}
+      sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} showHiddenFiles={showHiddenFiles} onSortModeChange={setTreeSortMode} onShowHiddenFilesChange={setShowHiddenFiles} selectedDirKey={selectedDirKey} selectedPath={file?.path} rootId={currentRootId} creatingRootName={creatingRootName} creatingRootBusy={creatingRootBusy} onCreateRootStart={handleCreateRootStart} onCreateRootNameChange={setCreatingRootName} onCreateRootSubmit={() => { void handleCreateRootSubmit(); }} onCreateRootCancel={handleCreateRootCancel} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true, isRoot: e.is_root === true})} relayActionLabel={relayActionLabel} relayActionDisabled={relayActionDisabled} relayActionHelp={null} onRelayAction={handleRelayAction} />}
       rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} onDelete={handleDeleteSession} onLoadOlder={handleLoadOlderSessions} loadingOlder={loadingOlderSessions} hasMore={hasMoreSessions} />}
       main={
         <div style={{ width: "100%", flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>

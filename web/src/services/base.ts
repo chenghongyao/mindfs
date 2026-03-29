@@ -6,6 +6,13 @@ function relayPrefix(): string {
   return match ? match[0] : "";
 }
 
+export function isRelayNodePage(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return /^\/n\/[^/]+/.test(window.location.pathname);
+}
+
 function ensureLeadingSlash(path: string): string {
   return path.startsWith("/") ? path : `/${path}`;
 }

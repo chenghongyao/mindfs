@@ -2,8 +2,6 @@ package relay
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -12,35 +10,6 @@ import (
 	"testing"
 	"time"
 )
-
-func TestParseBindCode(t *testing.T) {
-	t.Setenv("MINDFS_RELAY_BASE_URL", "")
-
-	t.Run("url scheme", func(t *testing.T) {
-		code, err := ParseBindCode("mindfs://bind?base_url=https%3A%2F%2Frelay.example.com&activation_token=act_123", Credentials{})
-		if err != nil {
-			t.Fatalf("ParseBindCode() error = %v", err)
-		}
-		if code.BaseURL != "https://relay.example.com" || code.ActivationToken != "act_123" {
-			t.Fatalf("unexpected bind code: %+v", code)
-		}
-	})
-
-	t.Run("base64 json", func(t *testing.T) {
-		payload, _ := json.Marshal(map[string]string{
-			"base_url":         "https://relay.example.com",
-			"activation_token": "act_456",
-		})
-		raw := base64.RawURLEncoding.EncodeToString(payload)
-		code, err := ParseBindCode(raw, Credentials{})
-		if err != nil {
-			t.Fatalf("ParseBindCode() error = %v", err)
-		}
-		if code.BaseURL != "https://relay.example.com" || code.ActivationToken != "act_456" {
-			t.Fatalf("unexpected bind code: %+v", code)
-		}
-	})
-}
 
 func TestCredentialsStoreSaveLoad(t *testing.T) {
 	configRoot := t.TempDir()
@@ -76,101 +45,109 @@ func TestCredentialsStoreSaveLoad(t *testing.T) {
 	}
 }
 
-func TestServiceActivate(t *testing.T) {
-	var activationCalls int
+func TestBuildBindPollURL(t *testing.T) {
+	got, err := buildBindPollURL("https://relay.example.com", "pc_123")
+	if err != nil {
+		t.Fatalf("buildBindPollURL() error = %v", err)
+	}
+	if got != "https://relay.example.com/api/bind/poll?code=pc_123" {
+		t.Fatalf("buildBindPollURL() = %q", got)
+	}
+}
+
+func TestServicePollBind(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("HOME", configRoot)
 
-	svc, err := NewService(":7331", "https://relay.example.com|act_abc")
+	svc, err := NewService(":7331")
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
 	svc.client = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.String() != "https://relay.example.com/api/activate" {
-				t.Fatalf("unexpected activation URL: %s", req.URL.String())
+			if req.URL.String() != "https://relay.example.com/api/bind/poll?code=pc_live" {
+				t.Fatalf("unexpected poll URL: %s", req.URL.String())
 			}
-			activationCalls++
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Status:     "200 OK",
 				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"device_token":"dev_abc","node_id":"node_abc","endpoint":"wss://relay.example.com/ws/connector"}`)),
+				Body:       io.NopCloser(strings.NewReader(`{"status":"confirmed","device_token":"dev_live","node_id":"node_live","endpoint":"wss://relay.example.com/ws/connector"}`)),
 			}, nil
 		}),
 	}
 
-	creds, err := svc.Bind(context.Background(), "https://relay.example.com|act_abc")
+	result, err := svc.PollBind(context.Background(), "https://relay.example.com", "pc_live")
 	if err != nil {
-		t.Fatalf("Bind() error = %v", err)
+		t.Fatalf("PollBind() error = %v", err)
 	}
-	if activationCalls != 1 {
-		t.Fatalf("activationCalls = %d, want 1", activationCalls)
+	if result.Status != "confirmed" {
+		t.Fatalf("status = %q", result.Status)
 	}
-	if creds.Relay.DeviceToken != "dev_abc" {
-		t.Fatalf("device token = %q", creds.Relay.DeviceToken)
+	if result.Credentials.DeviceToken != "dev_live" {
+		t.Fatalf("device token = %q", result.Credentials.DeviceToken)
 	}
 }
 
-func TestManagerStartBindsInitialCode(t *testing.T) {
+func TestManagerStartGeneratesPendingCode(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("HOME", configRoot)
 
-	manager, err := NewManager(":7331", "https://relay.example.com|act_start")
+	manager, err := NewManager(":7331", false, "https://relay.example.com")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
-
-	var activationCalls int
-	manager.service.client = &http.Client{
-		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			if req.URL.String() == "http://localhost:7331/health" {
-				return &http.Response{
-					StatusCode: http.StatusOK,
-					Status:     "200 OK",
-					Body:       io.NopCloser(strings.NewReader("ok")),
-					Header:     http.Header{},
-				}, nil
-			}
-			if req.URL.String() != "https://relay.example.com/api/activate" {
-				t.Fatalf("unexpected request URL: %s", req.URL.String())
-			}
-			activationCalls++
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 OK",
-				Header:     http.Header{"Content-Type": []string{"application/json"}},
-				Body:       io.NopCloser(strings.NewReader(`{"device_token":"dev_start","node_id":"node_start","endpoint":"wss://relay.example.com/ws/connector"}`)),
-			}, nil
-		}),
-	}
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if err := manager.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if activationCalls != 1 {
-		t.Fatalf("activationCalls = %d, want 1", activationCalls)
+	status := manager.Status()
+	if status.PendingCode == "" {
+		t.Fatal("expected pending code")
 	}
-
-	creds, err := manager.service.store.Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+	if status.Bound {
+		t.Fatal("expected unbound status")
 	}
-	if creds.Relay.NodeID != "node_start" {
-		t.Fatalf("node id = %q", creds.Relay.NodeID)
+	if status.RelayBaseURL != "https://relay.example.com" {
+		t.Fatalf("relay base url = %q", status.RelayBaseURL)
+	}
+	if status.NodeName == "" {
+		t.Fatal("expected node name")
 	}
 }
 
-func TestManagerBindStartsRelayAfterEmptyStart(t *testing.T) {
+func TestManagerNoRelayerDoesNotGeneratePendingCode(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
 	t.Setenv("HOME", configRoot)
 
-	manager, err := NewManager(":7331", "")
+	manager, err := NewManager(":7331", true, "https://relay.example.com")
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	status := manager.Status()
+	if status.PendingCode != "" {
+		t.Fatalf("expected no pending code, got %q", status.PendingCode)
+	}
+	if !status.NoRelayer {
+		t.Fatal("expected no-relayer status")
+	}
+}
+
+func TestManagerPollConfirmedStartsRelay(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+
+	manager, err := NewManager(":7331", false, "https://relay.example.com")
 	if err != nil {
 		t.Fatalf("NewManager() error = %v", err)
 	}
@@ -179,15 +156,15 @@ func TestManagerBindStartsRelayAfterEmptyStart(t *testing.T) {
 	manager.service.client = &http.Client{
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			requests <- req.URL.String()
-			switch req.URL.String() {
-			case "https://relay.example.com/api/activate":
+			switch {
+			case strings.HasPrefix(req.URL.String(), "https://relay.example.com/api/bind/poll?code=pc_"):
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Status:     "200 OK",
 					Header:     http.Header{"Content-Type": []string{"application/json"}},
-					Body:       io.NopCloser(strings.NewReader(`{"device_token":"dev_live","node_id":"node_live","endpoint":"wss://relay.example.com/ws/connector"}`)),
+					Body:       io.NopCloser(strings.NewReader(`{"status":"confirmed","device_token":"dev_live","node_id":"node_live","endpoint":"wss://relay.example.com/ws/connector"}`)),
 				}, nil
-			case "http://localhost:7331/health":
+			case req.URL.String() == "http://localhost:7331/health":
 				return &http.Response{
 					StatusCode: http.StatusOK,
 					Status:     "200 OK",
@@ -205,20 +182,47 @@ func TestManagerBindStartsRelayAfterEmptyStart(t *testing.T) {
 	if err := manager.Start(ctx); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if _, err := manager.Bind(context.Background(), "https://relay.example.com|act_live"); err != nil {
-		t.Fatalf("Bind() error = %v", err)
-	}
 
-	timeout := time.After(2 * time.Second)
+	timeout := time.After(4 * time.Second)
 	for {
 		select {
 		case raw := <-requests:
 			if raw == "http://localhost:7331/health" {
+				creds, err := manager.service.store.Load()
+				if err != nil {
+					t.Fatalf("Load() error = %v", err)
+				}
+				if creds.Relay.NodeID != "node_live" {
+					t.Fatalf("node id = %q", creds.Relay.NodeID)
+				}
 				return
 			}
 		case <-timeout:
-			t.Fatal("relay did not start after bind")
+			t.Fatal("relay did not start after confirmed poll")
 		}
+	}
+}
+
+func TestManagerDefaultsRelayBaseToLocalhost(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+
+	manager, err := NewManager(":7331", false, "")
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := manager.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	status := manager.Status()
+	if status.RelayBaseURL != defaultRelayBaseURL {
+		t.Fatalf("relay base url = %q, want %q", status.RelayBaseURL, defaultRelayBaseURL)
+	}
+	if status.PendingCode == "" {
+		t.Fatal("expected pending code")
 	}
 }
 

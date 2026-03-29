@@ -39,6 +39,10 @@ type FileTreeProps = {
   onCreateRootNameChange?: (name: string) => void;
   onCreateRootSubmit?: () => void;
   onCreateRootCancel?: () => void;
+  relayActionLabel?: string | null;
+  relayActionDisabled?: boolean;
+  relayActionHelp?: string | null;
+  onRelayAction?: () => void;
 };
 
 const ChevronRight = ({ isOpen }: { isOpen: boolean }) => (
@@ -116,6 +120,10 @@ export function FileTree({
   onCreateRootNameChange,
   onCreateRootSubmit,
   onCreateRootCancel,
+  relayActionLabel = null,
+  relayActionDisabled = false,
+  relayActionHelp = null,
+  onRelayAction,
 }: FileTreeProps) {
   const expandedSet = new Set(expanded);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
@@ -579,6 +587,60 @@ export function FileTree({
           flexShrink: 0,
         }}
       >
+        {shouldShowInstallButton ? (
+          relayActionLabel ? (
+            <button
+              type="button"
+              disabled={relayActionDisabled}
+              onClick={() => onRelayAction?.()}
+              style={{
+                width: "100%",
+                border: "1px solid var(--border-color)",
+                background: relayActionDisabled ? "rgba(148, 163, 184, 0.2)" : "var(--accent-color)",
+                color: relayActionDisabled ? "var(--text-secondary)" : "#fff",
+                borderRadius: "10px",
+                padding: "10px 12px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                cursor: relayActionDisabled ? "not-allowed" : "pointer",
+                fontSize: "12px",
+                fontWeight: 600,
+              }}
+            >
+              <span>{relayActionLabel}</span>
+            </button>
+          ) : null
+        ) : relayActionLabel ? (
+          <button
+            type="button"
+            disabled={relayActionDisabled}
+            onClick={() => onRelayAction?.()}
+            style={{
+              width: "100%",
+              border: "1px solid var(--border-color)",
+              background: relayActionDisabled ? "rgba(148, 163, 184, 0.2)" : "var(--accent-color)",
+              color: relayActionDisabled ? "var(--text-secondary)" : "#fff",
+              borderRadius: "10px",
+              padding: "10px 12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "8px",
+              cursor: relayActionDisabled ? "not-allowed" : "pointer",
+              fontSize: "12px",
+              fontWeight: 600,
+            }}
+          >
+            <span>{relayActionLabel}</span>
+          </button>
+        ) : null}
+        {relayActionHelp ? (
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
+            {relayActionHelp}
+          </div>
+        ) : null}
         {shouldShowInstallButton ? (
           <button
             type="button"

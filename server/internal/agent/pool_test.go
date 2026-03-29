@@ -103,3 +103,10 @@ func TestPoolConfigReturnsLoadedConfig(t *testing.T) {
 		t.Fatalf("expected gemini in pool config")
 	}
 }
+
+func TestLoadConfigReadsRelayBaseURL(t *testing.T) {
+	cfg := loadPoolTestConfig(t)
+	if cfg.RelayBaseURL != "https://relay.example.com" {
+		t.Fatalf("relay base url = %q", cfg.RelayBaseURL)
+	}
+}
