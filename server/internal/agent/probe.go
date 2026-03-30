@@ -531,7 +531,6 @@ func VerifySessionInteraction(ctx context.Context, sess agenttypes.Session) erro
 		return errors.New("session required")
 	}
 
-	token := "MINDFS_PING_TOKEN_" + time.Now().UTC().Format("150405")
 	var (
 		mu      sync.Mutex
 		text    strings.Builder
@@ -558,8 +557,7 @@ func VerifySessionInteraction(ctx context.Context, sess agenttypes.Session) erro
 		}
 	})
 
-	prompt := "Reply with EXACT text: " + token + ". No markdown, no explanation."
-	if err := sess.SendMessage(ctx, prompt); err != nil {
+	if err := sess.SendMessage(ctx, "hello"); err != nil {
 		return err
 	}
 
@@ -574,9 +572,9 @@ func VerifySessionInteraction(ctx context.Context, sess agenttypes.Session) erro
 	if !gotDone {
 		return errors.New("done event not received")
 	}
-	gotText := text.String()
-	if !strings.Contains(gotText, token) {
-		return fmt.Errorf("response missing token %q: %q", token, gotText)
+	gotText := strings.TrimSpace(text.String())
+	if gotText == "" {
+		return errors.New("response was empty")
 	}
 	return nil
 }

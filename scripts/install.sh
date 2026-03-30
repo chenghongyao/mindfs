@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# MindFS installer for macOS and Linux.
+# Downloads the correct release from GitHub and installs it.
+# Usage:  bash install.sh [--version VERSION] [--prefix PREFIX]
+set -euo pipefail
+
+REPO="a9gent/mindfs"
+VERSION=""
+PREFIX="/usr/local"
+
+# ── Parse arguments ────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version)  VERSION="$2";  shift 2 ;;
+    --prefix)   PREFIX="$2";   shift 2 ;;
+    *) echo "Unknown option: $1" >&2; exit 1 ;;
+  esac
+done
+
+# ── Detect OS ──────────────────────────────────────────────────────────────
+detect_os() {
+  local raw; raw="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  case "$raw" in
+    darwin) echo "darwin" ;;
+    linux)  echo "linux"  ;;
+    *) echo "Unsupported OS: $raw" >&2; exit 1 ;;
+  esac
+}
+
+# ── Detect architecture ────────────────────────────────────────────────────
+detect_arch() {
+  local raw; raw="$(uname -m)"
+  case "$raw" in
+    x86_64|amd64)  echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    armv7*|armhf)  echo "arm"   ;;
+    *) echo "Unsupported arch: $raw" >&2; exit 1 ;;
+  esac
+}
+
+OS="$(detect_os)"
+ARCH="$(detect_arch)"
+
+# ── Resolve version from GitHub API if not specified ───────────────────────
+if [[ -z "$VERSION" ]]; then
+  echo "Fetching latest release version..."
+  if command -v curl &>/dev/null; then
+    VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
+      | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"v\?\([^"]*\)".*/\1/')"
+  elif command -v wget &>/dev/null; then
+    VERSION="$(wget -qO- "https://api.github.com/repos/${REPO}/releases/latest" \
+      | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"v\?\([^"]*\)".*/\1/')"
+  else
+    echo "Error: curl or wget is required." >&2; exit 1
+  fi
+  if [[ -z "$VERSION" ]]; then
+    echo "Error: could not determine latest version. Use --version to specify." >&2; exit 1
+  fi
+fi
+
+echo "Installing mindfs v${VERSION} for ${OS}/${ARCH}"
+echo "  Prefix: ${PREFIX}"
+
+# ── Download ────────────────────────────────────────────────────────────────
+FILENAME="mindfs_${VERSION}_${OS}_${ARCH}.tar.gz"
+URL="https://github.com/${REPO}/releases/download/v${VERSION}/${FILENAME}"
+TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TMPDIR"' EXIT
+
+echo "  Downloading ${URL}"
+if command -v curl &>/dev/null; then
+  curl -fsSL "$URL" -o "${TMPDIR}/${FILENAME}"
+else
+  wget -qO "${TMPDIR}/${FILENAME}" "$URL"
+fi
+
+# ── Extract ─────────────────────────────────────────────────────────────────
+tar -xzf "${TMPDIR}/${FILENAME}" -C "$TMPDIR"
+PKG_DIR="${TMPDIR}/mindfs_${VERSION}_${OS}_${ARCH}"
+
+if [[ ! -d "$PKG_DIR" ]]; then
+  echo "Error: unexpected archive structure (expected ${PKG_DIR})." >&2; exit 1
+fi
+
+# ── Install binary ──────────────────────────────────────────────────────────
+mkdir -p "${PREFIX}/bin"
+install -m 0755 "${PKG_DIR}/mindfs" "${PREFIX}/bin/mindfs"
+echo "  Binary  -> ${PREFIX}/bin/mindfs"
+
+# ── Install web assets (optional) ───────────────────────────────────────────
+if [[ -d "${PKG_DIR}/web" ]]; then
+  WEB_DEST="${PREFIX}/share/mindfs/web"
+  mkdir -p "${PREFIX}/share/mindfs"
+  rm -rf "$WEB_DEST"
+  cp -r "${PKG_DIR}/web" "$WEB_DEST"
+  echo "  Web     -> ${WEB_DEST}"
+fi
+
+# ── Verify ──────────────────────────────────────────────────────────────────
+echo
+if command -v mindfs &>/dev/null; then
+  echo "Done. mindfs is available at: $(command -v mindfs)"
+else
+  echo "Done. Make sure ${PREFIX}/bin is in your PATH."
+  echo "  Add to your shell profile:  export PATH=\"${PREFIX}/bin:\$PATH\""
+fi

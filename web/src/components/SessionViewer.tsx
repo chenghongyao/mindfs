@@ -101,6 +101,8 @@ const formatTime = (isoString?: string) => {
 };
 
 const formatToolCallFallbackResult = (toolCall: Partial<ToolCall>): string => {
+  const kind = (toolCall.kind || "").toLowerCase();
+  if (kind === "read") return "";
   const rawInput = toolCall.meta?.input;
   if (typeof rawInput === "string" && rawInput.trim() !== "") return rawInput;
   const rawOutput = toolCall.meta?.output;

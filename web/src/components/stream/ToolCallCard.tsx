@@ -74,12 +74,15 @@ export const ToolCallCard = memo(function ToolCallCard({
     normalizedKind === "move" ||
     detailSections.some((section) => section.type === "diff");
   const fileNames = useMemo(() => {
-    const names = detailSections
+    const diffNames = detailSections
       .filter((section): section is Extract<DetailSection, { type: "diff" }> => section.type === "diff")
       .map((section) => basename(section.path))
       .filter(Boolean);
-    return Array.from(new Set(names));
-  }, [detailSections]);
+    const locationNames = (locations || [])
+      .map((loc) => basename(normalizeDisplayPath(loc.path, rootPath)))
+      .filter(Boolean);
+    return Array.from(new Set([...diffNames, ...locationNames]));
+  }, [detailSections, locations, rootPath]);
   const label = isFileChange
     ? labelKind || "edit"
     : [labelKind, labelTitle].filter(Boolean).join(" ").trim() || labelKind || labelTitle || "tool";

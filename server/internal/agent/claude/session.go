@@ -233,6 +233,14 @@ func (s *session) consumeMessages() {
 		return
 	}
 
+	// Claude SDK multiplexes several logical message types onto one channel:
+	// - PartialAssistantMessage: incremental tokens for visible text or thinking
+	// - AssistantMessage: a finalized assistant payload, including tool_use blocks
+	// - UserMessage: a local echo that primarily carries tool_use_result here
+	// - ToolProgressMessage: intermediate progress for a running tool call
+	// - ResultMessage: the completion or error boundary for the current turn
+	//
+	// This function normalizes them into our internal session event stream.
 	s.sawDelta = false
 	s.pendingText.Reset()
 	s.pendingThinking.Reset()
@@ -242,19 +250,27 @@ func (s *session) consumeMessages() {
 
 		switch m := msg.(type) {
 		case claudeagent.PartialAssistantMessage:
+			// Incremental text / thinking tokens. Buffer and coalesce them into
+			// larger readable chunks before emitting UI updates.
 			s.handlePartialAssistantMessage(m.Event)
 		case claudeagent.AssistantMessage:
+			// Finalized assistant message. Flush pending deltas first so finalized
+			// blocks do not interleave with previously buffered streaming output.
 			s.flushAllDeltas()
-			s.logRawToolCallBlocks(raw)
 			s.handleAssistantMessage(m, s.sawDelta)
 		case claudeagent.UserMessage:
+			// Claude SDK surfaces tool execution results as a synthetic "user"
+			// message. ToolUseResult maps to the earliest pending tool_use.
 			s.flushAllDeltas()
 			s.logRawToolResult(m)
 			s.handleUserMessage(m)
 		case claudeagent.ToolProgressMessage:
+			// Lightweight progress heartbeat for a tool call that is still running.
 			s.flushAllDeltas()
 			s.emitToolUpdate(m.ToolUseID, m.ToolName)
 		case claudeagent.ResultMessage:
+			// End-of-turn boundary. Claude may place the final text here when no
+			// incremental tokens were streamed, so emit it as a last fallback.
 			s.flushAllDeltas()
 			if !s.sawMessageText && strings.TrimSpace(m.Result) != "" {
 				s.emitMessageChunk(m.Result)
@@ -277,6 +293,8 @@ func (s *session) handlePartialAssistantMessage(rawEvent json.RawMessage) {
 	if textDelta == "" && thinkingDelta == "" && len(rawEvent) > 0 {
 		log.Printf("[agent/claude] output.unhandled.partial session=%s raw=%s", s.sessionKey, truncateRaw(rawEvent))
 	}
+	// Thinking and visible text are rendered in separate UI lanes, so flush the
+	// other lane before appending to the current one.
 	if thinkingDelta != "" {
 		s.flushDelta(deltaTypeText)
 		s.appendDelta(deltaTypeThinking, thinkingDelta)
@@ -338,6 +356,8 @@ func (s *session) handleAssistantMessage(msg claudeagent.AssistantMessage, sawDe
 	for _, block := range msg.Message.Content {
 		switch block.Type {
 		case "text":
+			// If text was already streamed via partial deltas, skip the duplicated
+			// finalized text block.
 			if sawDelta {
 				continue
 			}
@@ -345,9 +365,11 @@ func (s *session) handleAssistantMessage(msg claudeagent.AssistantMessage, sawDe
 		case "thinking":
 			s.emitThoughtChunk(block.Text)
 		case "tool_use":
+			// tool_use is the structured tool invocation request. Its completion
+			// arrives later as UserMessage + ToolUseResult.
+			s.logRawToolCallBlock(block)
 			toolCall := newRunningToolCall(block.ID, block.Name, block.Type, block.Input)
 			s.trackPendingToolCall(toolCall)
-			log.Printf("[agent/claude] output.tool_call session=%s tool=%s status=%s raw=%s", s.sessionKey, block.Name, toolCall.Status, toolCallLogValue(toolCall))
 			s.emit(types.Event{
 				Type:      types.EventTypeToolCall,
 				SessionID: s.SessionID(),
@@ -358,6 +380,8 @@ func (s *session) handleAssistantMessage(msg claudeagent.AssistantMessage, sawDe
 }
 
 func (s *session) handleUserMessage(msg claudeagent.UserMessage) {
+	// Claude tool results do not come back on AssistantMessage. They arrive
+	// here, and we map the result onto the earliest pending tool call.
 	update, ok := s.toolResultUpdate(msg)
 	if !ok {
 		return
@@ -370,21 +394,23 @@ func (s *session) handleUserMessage(msg claudeagent.UserMessage) {
 }
 
 func newRunningToolCall(callID, name, rawType string, input json.RawMessage) types.ToolCall {
-	title, meta := summarizeToolCall(name, input)
+	title, meta, locations, content := summarizeToolCall(name, input)
 	return types.ToolCall{
-		CallID:  callID,
-		Title:   title,
-		Status:  "running",
-		Kind:    mapToolKind(name),
-		RawType: rawType,
-		Meta:    meta,
+		CallID:    callID,
+		Title:     title,
+		Status:    "running",
+		Kind:      mapToolKind(name),
+		Locations: locations,
+		Content:   content,
+		RawType:   rawType,
+		Meta:      meta,
 	}
 }
 
-func summarizeToolCall(name string, input json.RawMessage) (string, map[string]any) {
+func summarizeToolCall(name string, input json.RawMessage) (string, map[string]any, []types.ToolCallLocation, []types.ToolCallContentItem) {
 	rawInput := strings.TrimSpace(string(input))
 	if rawInput == "" {
-		return name, nil
+		return name, nil, nil, nil
 	}
 
 	meta := map[string]any{"input": rawInput}
@@ -392,33 +418,72 @@ func summarizeToolCall(name string, input json.RawMessage) (string, map[string]a
 	case types.ToolKindRead, types.ToolKindEdit:
 		return summarizePathToolCall(name, input, meta)
 	case types.ToolKindExecute:
-		return summarizeExecuteToolCall(name, input, meta)
+		title, nextMeta := summarizeExecuteToolCall(name, input, meta)
+		return title, nextMeta, nil, nil
 	case types.ToolKindSearch:
-		return summarizeSearchToolCall(name, input, meta)
+		title, nextMeta := summarizeSearchToolCall(name, input, meta)
+		return title, nextMeta, nil, nil
 	default:
-		return name, meta
+		return name, meta, nil, nil
 	}
 }
 
-func summarizePathToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any) {
+func summarizePathToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any, []types.ToolCallLocation, []types.ToolCallContentItem) {
 	var payload struct {
-		FilePath string `json:"file_path"`
+		FilePath   string `json:"file_path"`
+		OldString  string `json:"old_string"`
+		NewString  string `json:"new_string"`
+		Content    string `json:"content"`
+		ReplaceAll bool   `json:"replace_all"`
 	}
 	if err := json.Unmarshal(input, &payload); err != nil {
-		return name, fallbackMeta
+		return name, fallbackMeta, nil, nil
 	}
 
 	path := strings.TrimSpace(payload.FilePath)
 	if path == "" {
-		return name, fallbackMeta
+		return name, fallbackMeta, nil, nil
 	}
 
 	base := strings.TrimSpace(filepath.Base(path))
 	if base == "" || base == "." || base == string(filepath.Separator) {
-		return name, fallbackMeta
+		return name, fallbackMeta, nil, nil
 	}
 
-	return base, map[string]any{"filePath": path}
+	meta := map[string]any{"filePath": path}
+	if fallbackMeta != nil {
+		meta["input"] = fallbackMeta["input"]
+	}
+	if payload.ReplaceAll {
+		meta["replaceAll"] = true
+	}
+
+	locations := []types.ToolCallLocation{{Path: path}}
+	content := make([]types.ToolCallContentItem, 0, 1)
+
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "write":
+		if payload.Content != "" {
+			content = append(content, types.ToolCallContentItem{
+				Type:       "text",
+				Text:       payload.Content,
+				Path:       path,
+				ChangeKind: "add",
+			})
+		}
+	case "edit", "multiedit":
+		if payload.OldString != "" || payload.NewString != "" {
+			oldText := payload.OldString
+			content = append(content, types.ToolCallContentItem{
+				Type:    "diff",
+				Path:    path,
+				OldText: &oldText,
+				NewText: payload.NewString,
+			})
+		}
+	}
+
+	return base, meta, locations, content
 }
 
 func summarizeExecuteToolCall(name string, input json.RawMessage, fallbackMeta map[string]any) (string, map[string]any) {
@@ -484,9 +549,26 @@ func (s *session) toolResultUpdate(msg claudeagent.UserMessage) (types.ToolCall,
 	update := base
 	update.Status = "complete"
 	if result != "" {
-		update.Content = []types.ToolCallContentItem{{Type: "text", Text: result}}
+		update.Meta = mergeToolCallMeta(base.Meta, map[string]any{"output": result})
+		if base.Kind != types.ToolKindEdit || len(base.Content) == 0 {
+			update.Content = []types.ToolCallContentItem{{Type: "text", Text: result}}
+		}
 	}
 	return update, true
+}
+
+func mergeToolCallMeta(base map[string]any, extra map[string]any) map[string]any {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(base)+len(extra))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *session) popPendingToolCall() (types.ToolCall, bool) {
@@ -589,10 +671,12 @@ func (s *session) logRawMessage(raw []byte) {
 	log.Printf("[agent/claude] output.raw session=%s msg=%s", s.sessionKey, truncateRaw(raw))
 }
 
-func (s *session) logRawToolCallBlocks(raw []byte) {
-	for _, block := range extractContentBlocksByType(raw, "tool_use") {
-		s.agentDebugLog.AppendRaw(block)
+func (s *session) logRawToolCallBlock(block claudeagent.ContentBlock) {
+	raw, err := json.Marshal(block)
+	if err != nil {
+		return
 	}
+	s.agentDebugLog.AppendRaw(raw)
 }
 
 func (s *session) logRawToolResult(msg claudeagent.UserMessage) {
@@ -746,41 +830,6 @@ func mapToolKind(name string) types.ToolKind {
 	default:
 		return types.ToolKindOther
 	}
-}
-
-func extractContentBlocksByType(raw []byte, blockType string) []json.RawMessage {
-	if len(raw) == 0 || strings.TrimSpace(blockType) == "" {
-		return nil
-	}
-	var envelope struct {
-		Message struct {
-			Content []json.RawMessage `json:"content"`
-		} `json:"message"`
-		Content []json.RawMessage `json:"content"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil
-	}
-	content := envelope.Message.Content
-	if len(content) == 0 {
-		content = envelope.Content
-	}
-	if len(content) == 0 {
-		return nil
-	}
-	out := make([]json.RawMessage, 0, len(content))
-	for _, block := range content {
-		var meta struct {
-			Type string `json:"type"`
-		}
-		if err := json.Unmarshal(block, &meta); err != nil {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(meta.Type), blockType) {
-			out = append(out, append(json.RawMessage(nil), block...))
-		}
-	}
-	return out
 }
 
 func preview(content string) string {
