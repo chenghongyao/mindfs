@@ -160,8 +160,11 @@ func buildBindPollURL(baseURL, pendingCode string) (string, error) {
 func (s *Service) runSession(ctx context.Context, creds RelayCredentials) error {
 	headers := http.Header{}
 	headers.Set("Authorization", "Bearer "+creds.DeviceToken)
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, creds.Endpoint, headers)
+	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, creds.Endpoint, headers)
 	if err != nil {
+		if resp != nil && strings.TrimSpace(resp.Status) != "" {
+			return fmt.Errorf("relay websocket dial failed: %s: %w", resp.Status, err)
+		}
 		return err
 	}
 	defer conn.Close()
@@ -363,5 +366,5 @@ func isPermanentRelayError(err error) bool {
 		return false
 	}
 	msg := err.Error()
-	return strings.Contains(msg, "401") || strings.Contains(msg, "403")
+	return strings.Contains(msg, "401") || strings.Contains(msg, "403") || strings.Contains(msg, "404")
 }

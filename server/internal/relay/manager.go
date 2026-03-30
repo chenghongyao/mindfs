@@ -121,6 +121,10 @@ func (m *Manager) startLocked(parent context.Context) {
 	m.cancel = cancel
 	go func() {
 		if err := m.service.Run(runCtx); err != nil && runCtx.Err() == nil {
+			if isPermanentRelayError(err) {
+				m.handlePermanentRelayError(err)
+				return
+			}
 			log.Printf("[relay] stopped: %v", err)
 		}
 	}()
@@ -201,6 +205,27 @@ func (m *Manager) restart() {
 	}
 	if m.ctx != nil {
 		m.startLocked(m.ctx)
+	}
+}
+
+func (m *Manager) handlePermanentRelayError(err error) {
+	m.mu.Lock()
+	parent := m.ctx
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
+	if clearErr := m.service.store.Clear(); clearErr != nil {
+		log.Printf("[relay] clear credentials failed after permanent error: %v", clearErr)
+	}
+	m.ensurePendingLocked()
+	m.lastError = err.Error()
+	pendingCode := m.pendingCode
+	m.mu.Unlock()
+
+	log.Printf("[relay] credentials invalidated, rebinding required: %v", err)
+	if parent != nil && strings.TrimSpace(pendingCode) != "" {
+		m.startPollingLocked(parent, pendingCode)
 	}
 }
 

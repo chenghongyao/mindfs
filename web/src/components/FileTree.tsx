@@ -163,11 +163,23 @@ export function FileTree({
     return isAndroid && isChrome && !isExcluded;
   }, []);
 
+  const isDesktopChromium = React.useMemo(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+    const ua = window.navigator.userAgent;
+    const isDesktop = !/Android|iPhone|iPad|iPod/i.test(ua);
+    const isChromium = /Chrome|Chromium|Edg/i.test(ua);
+    const isExcluded = /OPR/i.test(ua);
+    return isDesktop && isChromium && !isExcluded;
+  }, []);
+
   const isStandaloneDisplay = React.useCallback(() => {
     if (typeof window === "undefined") {
       return false;
     }
     return window.matchMedia("(display-mode: standalone)").matches
+      || window.matchMedia("(display-mode: window-controls-overlay)").matches
       || window.matchMedia("(display-mode: fullscreen)").matches
       || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
   }, []);
@@ -199,9 +211,10 @@ export function FileTree({
     }
 
     const updateInstallState = () => {
-      const installed = isStandaloneDisplay() || hasPersistedInstallState();
+      const installed = isStandaloneDisplay();
+      const knownInstall = installed || hasPersistedInstallState();
       setIsInstalled(installed);
-      setIsInstallCapable(installed || isIOS || "serviceWorker" in navigator);
+      setIsInstallCapable(knownInstall || isIOS || "serviceWorker" in navigator);
     };
 
     const handleBeforeInstallPrompt = (event: Event) => {
@@ -219,19 +232,37 @@ export function FileTree({
     updateInstallState();
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleInstalled);
+    window.addEventListener("pageshow", updateInstallState);
+    document.addEventListener("visibilitychange", updateInstallState);
+
+    const standaloneQuery = window.matchMedia("(display-mode: standalone)");
+    const overlayQuery = window.matchMedia("(display-mode: window-controls-overlay)");
+    const fullscreenQuery = window.matchMedia("(display-mode: fullscreen)");
+    standaloneQuery.addEventListener?.("change", updateInstallState);
+    overlayQuery.addEventListener?.("change", updateInstallState);
+    fullscreenQuery.addEventListener?.("change", updateInstallState);
 
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
       window.removeEventListener("appinstalled", handleInstalled);
+      window.removeEventListener("pageshow", updateInstallState);
+      document.removeEventListener("visibilitychange", updateInstallState);
+      standaloneQuery.removeEventListener?.("change", updateInstallState);
+      overlayQuery.removeEventListener?.("change", updateInstallState);
+      fullscreenQuery.removeEventListener?.("change", updateInstallState);
     };
   }, [hasPersistedInstallState, isIOS, isStandaloneDisplay, persistInstallState]);
 
-  const installLabel = isInstalled
+  const isKnownInstalled = isInstalled || hasPersistedInstallState();
+
+  const installLabel = isKnownInstalled
     ? "已安装"
     : isIOS
       ? "添加到主屏幕"
       : isMacSafari
         ? "添加到 Dock"
+      : isDesktopChromium && isInstallCapable
+        ? "安装应用"
       : isAndroidChrome && !deferredInstallPrompt
         ? "从菜单安装"
       : deferredInstallPrompt
@@ -239,22 +270,27 @@ export function FileTree({
         : "安装说明";
 
   const installHelp = isInstalled
-    ? "当前已作为应用打开"
-    : isIOS
+    ? ""
+    : isKnownInstalled
+      ? "已安装，可从桌面或应用列表打开"
+      : isIOS
       ? "在 Safari 中用分享菜单安装"
       : isMacSafari
         ? "请用 Safari 菜单 File > Add to Dock"
+      : isDesktopChromium && isInstallCapable
+        ? "可从地址栏安装图标或浏览器菜单中安装"
       : isAndroidChrome && !deferredInstallPrompt
         ? "请在浏览器菜单中选择“添加到主屏幕”或“安装应用”"
       : deferredInstallPrompt
         ? "安装后可从桌面独立启动"
         : "当前浏览器未提供安装弹窗";
 
-  const shouldShowInstallButton = !isInstalled && !(isAndroidChrome && !deferredInstallPrompt);
-  const shouldShowInstallHelp = isInstalled || isIOS || isMacSafari || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt);
+  const shouldShowInstallButton = !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
+  const shouldShowInstallHelp = (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
+  const hasFooterContent = !!relayActionLabel || !!relayActionHelp || shouldShowInstallButton || shouldShowInstallHelp;
 
   const handleInstall = React.useCallback(async () => {
-    if (isInstalled) {
+    if (isKnownInstalled) {
       return;
     }
     if (deferredInstallPrompt) {
@@ -278,6 +314,10 @@ export function FileTree({
       window.alert("请在 Safari 菜单中选择 File > Add to Dock。该浏览器不会从网页按钮直接弹出安装窗口。");
       return;
     }
+    if (isDesktopChromium && typeof window !== "undefined") {
+      window.alert("请使用地址栏右侧的安装图标，或在浏览器菜单中选择“安装 MindFS”。");
+      return;
+    }
     if (isAndroidChrome && typeof window !== "undefined") {
       window.alert("请在 Chrome 菜单中选择“添加到主屏幕”或“安装应用”。某些移动端场景下，Chrome 不会把安装弹窗权限直接暴露给网页按钮。");
       return;
@@ -285,7 +325,7 @@ export function FileTree({
     if (typeof window !== "undefined") {
       window.alert("当前浏览器没有提供 PWA 安装弹窗。请改用 Safari、Chrome 或 Edge 打开。");
     }
-  }, [deferredInstallPrompt, isAndroidChrome, isIOS, isInstalled, isMacSafari, persistInstallState]);
+  }, [deferredInstallPrompt, isAndroidChrome, isDesktopChromium, isIOS, isKnownInstalled, isMacSafari, persistInstallState]);
 
   React.useEffect(() => {
     if (!creatingRootName) {
@@ -579,8 +619,8 @@ export function FileTree({
       </div>
       <div
         style={{
-          padding: "10px 12px 12px",
-          borderTop: "1px solid var(--border-color)",
+          padding: hasFooterContent ? "10px 12px 12px" : "0",
+          borderTop: hasFooterContent ? "1px solid var(--border-color)" : "none",
           display: "flex",
           flexDirection: "column",
           gap: "6px",

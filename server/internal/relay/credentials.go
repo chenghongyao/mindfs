@@ -69,3 +69,13 @@ func (s *CredentialsStore) Save(creds Credentials) error {
 	}
 	return os.WriteFile(s.filePath, payload, 0o644)
 }
+
+func (s *CredentialsStore) Clear() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := os.Remove(s.filePath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}

@@ -60,6 +60,7 @@ type RelayStatusPayload = {
   node_url?: string;
   last_error?: string;
 };
+const RELAY_LAST_NODE_ID_STORAGE_KEY = "mindfs.relay.last_node_id";
 const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 const TREE_SORT_STORAGE_KEY = "mindfs-tree-sort-mode";
 const DIRECTORY_SORT_OVERRIDES_STORAGE_KEY = "mindfs-directory-sort-overrides";
@@ -75,6 +76,36 @@ function buildFileScrollKey(rootId: string | null | undefined, path: string | nu
 
 function hasSessionExchanges(session: Session | null | undefined): boolean {
   return Array.isArray(session?.exchanges) && session.exchanges.length > 0;
+}
+
+function relayNodeIdFromPathname(pathname: string): string {
+  const match = /^\/n\/([^/]+)/.exec(String(pathname || ""));
+  return match?.[1] || "";
+}
+
+function isStandaloneDisplayMode(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
+  return window.matchMedia?.("(display-mode: standalone)")?.matches === true || navigatorWithStandalone.standalone === true;
+}
+
+function isRelayPWAContext(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return isStandaloneDisplayMode() && (/^\/n\/[^/]+/.test(window.location.pathname) || window.location.pathname === "/nodes" || window.location.pathname === "/login");
+}
+
+function extractHTTPStatusFromErrorMessage(message: string): number | null {
+  const match = /status=(\d{3})|(?:^|:\s)(\d{3})\s[A-Z]/.exec(String(message || ""));
+  const raw = match?.[1] || match?.[2];
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function loadPersistedFileScrollPositions(): Record<string, number> {
@@ -602,6 +633,40 @@ export function App() {
     const target = `${window.location.pathname}${search}`;
     window.history.replaceState(null, "", target);
   }, []);
+
+  const redirectToRelayLogin = useCallback(() => {
+    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    window.location.replace(`/login?next=${next}`);
+  }, []);
+
+  const redirectToRelayNodes = useCallback(() => {
+    window.location.replace("/nodes");
+  }, []);
+
+  const handleRelayNavigationFailure = useCallback((status: number, errorCode?: string | null) => {
+    if (!isRelayPWAContext()) {
+      return false;
+    }
+    const code = String(errorCode || "").trim();
+    if (status === 401 || code === "unauthorized") {
+      redirectToRelayLogin();
+      return true;
+    }
+    if (
+      status === 403 ||
+      status === 404 ||
+      status === 502 ||
+      status === 503 ||
+      code === "forbidden" ||
+      code === "node_not_found" ||
+      code === "node_offline" ||
+      code === "connector_unavailable"
+    ) {
+      redirectToRelayNodes();
+      return true;
+    }
+    return false;
+  }, [redirectToRelayLogin, redirectToRelayNodes]);
 
   const rootSessionKey = useCallback((rootId: string, sessionKey: string) => `${rootId}::${sessionKey}`, []);
   const bumpCacheVersion = useCallback(() => setCacheVersion((v) => v + 1), []);
@@ -1379,6 +1444,10 @@ export function App() {
         setDrawerOpenForRoot(root, false);
         if (isMobile) setIsLeftOpen(false);
       } catch (err) {
+        const status = extractHTTPStatusFromErrorMessage((err as Error)?.message || "");
+        if (status && handleRelayNavigationFailure(status, "")) {
+          return;
+        }
         console.error("[file.open] failed", { root, path, cursor, err });
       }
     },
@@ -1403,6 +1472,13 @@ export function App() {
         replaceURLState({ root, file: "", session: "", cursor: 0, pluginQuery: nextPluginQuery });
         try {
           const res = await fetch(appURL("/api/tree", new URLSearchParams({ root, dir: apiDir })));
+          if (!res.ok) {
+            const payload = await res.json().catch(() => ({}));
+            if (handleRelayNavigationFailure(res.status, typeof payload?.error === "string" ? payload.error : "")) {
+              return;
+            }
+            return;
+          }
           const payload = await res.json();
           const parsed = normalizeTreeResponse(payload);
           setEntriesByPath((prev) => ({ ...prev, [`${root}:${apiDir}`]: parsed.entries }));
@@ -1428,7 +1504,7 @@ export function App() {
       if (isActuallyRoot) { setCurrentRootId(path); setExpanded((prev) => Array.from(new Set([...prev, path]))); } else { setExpanded((prev) => Array.from(new Set([...prev, expandedKey]))); }
       await loadDirectoryView(path, isActuallyRoot);
     }
-  }), [isMobile, normalizeTreeResponse, setDrawerOpenForRoot, replaceURLState, rememberCurrentFileScroll]);
+  }), [handleRelayNavigationFailure, isMobile, normalizeTreeResponse, setDrawerOpenForRoot, replaceURLState, rememberCurrentFileScroll]);
   const actionHandlersRef = useRef(actionHandlers);
   useEffect(() => {
     actionHandlersRef.current = actionHandlers;
@@ -1436,6 +1512,13 @@ export function App() {
 
   const refreshManagedRoots = useCallback(async () => {
     const response = await fetch(appPath("/api/dirs"));
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      if (handleRelayNavigationFailure(response.status, typeof payload?.error === "string" ? payload.error : "")) {
+        return;
+      }
+      return;
+    }
     const dirs = await response.json() as ManagedRootPayload[];
     const nextDirs = Array.isArray(dirs) ? dirs : [];
     const nextRootIds = nextDirs.map((dir) => dir.id).filter(Boolean);
@@ -1468,7 +1551,7 @@ export function App() {
 
     const nextRoot = nextRootIds[0];
     await actionHandlersRef.current.open_dir({ path: nextRoot, root: nextRoot, preservePluginQuery: true, isRoot: true });
-  }, [replaceURLState]);
+  }, [handleRelayNavigationFailure, replaceURLState]);
 
   const refreshRelayStatus = useCallback(async () => {
     if (typeof window !== "undefined" && isRelayNodePage()) {
@@ -2056,7 +2139,26 @@ export function App() {
     }
     didInitRef.current = true;
     let cancelled = false;
-    fetch(appPath("/api/dirs")).then(r => r.json()).then(async dirs => {
+    if (isRelayPWAContext() && !isRelayNodePage()) {
+      const lastNodeID = window.localStorage.getItem(RELAY_LAST_NODE_ID_STORAGE_KEY);
+      if (lastNodeID) {
+        window.location.replace(`/n/${lastNodeID}/`);
+        return;
+      }
+    }
+    fetch(appPath("/api/dirs")).then(async (r) => {
+      if (!r.ok) {
+        const payload = await r.json().catch(() => ({}));
+        if (handleRelayNavigationFailure(r.status, typeof payload?.error === "string" ? payload.error : "")) {
+          return null;
+        }
+        return null;
+      }
+      return r.json();
+    }).then(async dirs => {
+      if (!dirs) {
+        return;
+      }
       void refreshRelayStatus();
       if (cancelled || !dirs.length) return;
       const nextDirs = dirs as ManagedRootPayload[];
@@ -2080,7 +2182,18 @@ export function App() {
       }
     });
     return () => { cancelled = true; };
-  }, [ensurePluginsLoaded, refreshRelayStatus]);
+  }, [ensurePluginsLoaded, handleRelayNavigationFailure, refreshRelayStatus]);
+
+  useEffect(() => {
+    if (!isRelayPWAContext()) {
+      return;
+    }
+    const nodeID = relayNodeIdFromPathname(window.location.pathname);
+    if (!nodeID) {
+      return;
+    }
+    window.localStorage.setItem(RELAY_LAST_NODE_ID_STORAGE_KEY, nodeID);
+  }, []);
 
   useEffect(() => {
     function handlePopState() {

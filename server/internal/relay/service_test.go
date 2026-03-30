@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -42,6 +43,36 @@ func TestCredentialsStoreSaveLoad(t *testing.T) {
 
 	if _, err := os.Stat(store.filePath); err != nil {
 		t.Fatalf("credentials file missing: %v", err)
+	}
+}
+
+func TestCredentialsStoreClear(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+
+	store, err := NewCredentialsStore()
+	if err != nil {
+		t.Fatalf("NewCredentialsStore() error = %v", err)
+	}
+	if err := store.Save(Credentials{
+		Relay: RelayCredentials{
+			DeviceToken: "dev_123",
+			NodeID:      "node_123",
+			Endpoint:    "wss://relay.example.com/ws/connector",
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if err := store.Clear(); err != nil {
+		t.Fatalf("Clear() error = %v", err)
+	}
+	got, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Relay.DeviceToken != "" || got.Relay.Endpoint != "" || got.Relay.NodeID != "" {
+		t.Fatalf("expected empty credentials after clear, got %+v", got.Relay)
 	}
 }
 
@@ -223,6 +254,86 @@ func TestManagerDefaultsRelayBaseToLocalhost(t *testing.T) {
 	}
 	if status.PendingCode == "" {
 		t.Fatal("expected pending code")
+	}
+}
+
+func TestManagerPermanentRelayErrorClearsCredentialsAndRebinds(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+
+	manager, err := NewManager(":7331", false, "https://relay.example.com")
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	if err := manager.service.store.Save(Credentials{
+		Relay: RelayCredentials{
+			DeviceToken: "dev_live",
+			NodeID:      "node_live",
+			Endpoint:    "wss://relay.example.com/ws/connector",
+		},
+	}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	pollSeen := make(chan string, 1)
+	manager.service.client = &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			switch {
+			case strings.HasPrefix(req.URL.String(), "http://localhost:7331/health"):
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{},
+					Body:       io.NopCloser(strings.NewReader("ok")),
+				}, nil
+			case strings.HasPrefix(req.URL.String(), "https://relay.example.com/api/bind/poll?code=pc_"):
+				select {
+				case pollSeen <- req.URL.String():
+				default:
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     http.Header{"Content-Type": []string{"application/json"}},
+					Body:       io.NopCloser(strings.NewReader(`{"status":"pending","next_poll_after_ms":2000}`)),
+				}, nil
+			default:
+				return nil, nil
+			}
+		}),
+	}
+
+	manager.handlePermanentRelayError(errors.New("websocket: bad handshake (404 Not Found)"))
+
+	status := manager.Status()
+	if status.Bound {
+		t.Fatal("expected unbound status after permanent relay error")
+	}
+	if status.PendingCode == "" {
+		t.Fatal("expected pending code after permanent relay error")
+	}
+	if !strings.Contains(status.LastError, "404") {
+		t.Fatalf("last error = %q", status.LastError)
+	}
+	creds, err := manager.service.store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if creds.Relay.DeviceToken != "" || creds.Relay.Endpoint != "" {
+		t.Fatalf("expected cleared credentials, got %+v", creds.Relay)
+	}
+}
+
+func TestIsPermanentRelayErrorDetectsHandshakeStatus(t *testing.T) {
+	if !isPermanentRelayError(errors.New("relay websocket dial failed: 404 Not Found: websocket: bad handshake")) {
+		t.Fatal("expected 404 handshake to be treated as permanent")
+	}
+	if !isPermanentRelayError(errors.New("relay websocket dial failed: 401 Unauthorized: websocket: bad handshake")) {
+		t.Fatal("expected 401 handshake to be treated as permanent")
+	}
+	if isPermanentRelayError(errors.New("websocket: bad handshake")) {
+		t.Fatal("plain bad handshake without status should not be treated as permanent")
 	}
 }
 
