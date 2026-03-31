@@ -9,9 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,6 +27,8 @@ type Status struct {
 	HasUpdate           bool      `json:"has_update"`
 	Status              string    `json:"status"`
 	Message             string    `json:"message,omitempty"`
+	ReleaseName         string    `json:"release_name,omitempty"`
+	ReleaseBody         string    `json:"release_body,omitempty"`
 	ReleaseURL          string    `json:"release_url,omitempty"`
 	PublishedAt         time.Time `json:"published_at,omitempty"`
 	LastCheckedAt       time.Time `json:"last_checked_at,omitempty"`
@@ -48,6 +50,8 @@ type Service struct {
 
 type latestRelease struct {
 	TagName     string         `json:"tag_name"`
+	Name        string         `json:"name"`
+	Body        string         `json:"body"`
 	HTMLURL     string         `json:"html_url"`
 	PublishedAt time.Time      `json:"published_at"`
 	Assets      []releaseAsset `json:"assets"`
@@ -93,6 +97,7 @@ func (s *Service) Start(ctx context.Context) {
 		return
 	}
 	go func() {
+		log.Printf("[update] checker.start repo=%s current=%s interval=%s auto_update_supported=%t", s.repo, s.current, s.checkInterval, s.canAutoUpdate())
 		s.CheckNow(context.Background())
 		ticker := time.NewTicker(s.checkInterval)
 		defer ticker.Stop()
@@ -129,8 +134,10 @@ func (s *Service) CheckNow(ctx context.Context) {
 	if s == nil || strings.TrimSpace(s.repo) == "" {
 		return
 	}
+	log.Printf("[update] check.begin repo=%s current=%s", s.repo, s.current)
 	release, err := s.fetchLatestRelease(ctx)
 	if err != nil {
+		log.Printf("[update] check.error repo=%s current=%s err=%v", s.repo, s.current, err)
 		s.updateStatus(func(st *Status) {
 			st.LastCheckedAt = time.Now().UTC()
 			if st.Status == "downloading" || st.Status == "installing" || st.Status == "restarting" {
@@ -149,9 +156,12 @@ func (s *Service) CheckNow(ctx context.Context) {
 	latest := normalizeVersion(release.TagName)
 	current := normalizeVersion(s.current)
 	hasUpdate := latest != "" && latest != current
+	log.Printf("[update] check.result repo=%s current=%s latest=%s has_update=%t", s.repo, current, latest, hasUpdate)
 	s.updateStatus(func(st *Status) {
 		st.CurrentVersion = s.current
 		st.LatestVersion = latest
+		st.ReleaseName = strings.TrimSpace(release.Name)
+		st.ReleaseBody = strings.TrimSpace(release.Body)
 		st.ReleaseURL = strings.TrimSpace(release.HTMLURL)
 		st.PublishedAt = release.PublishedAt
 		st.LastCheckedAt = time.Now().UTC()
@@ -264,6 +274,7 @@ func (s *Service) fail(err error) {
 	if err != nil && strings.TrimSpace(err.Error()) != "" {
 		msg = err.Error()
 	}
+	log.Printf("[update] run.error current=%s latest=%s err=%s", s.current, s.GetStatus().LatestVersion, msg)
 	s.updateStatus(func(st *Status) {
 		st.Status = "failed"
 		st.Message = msg
@@ -309,13 +320,24 @@ func (s *Service) pickAsset(release latestRelease, version string) (releaseAsset
 	if runtime.GOOS == "windows" {
 		ext = ".zip"
 	}
-	want := fmt.Sprintf("mindfs_%s_%s_%s%s", version, runtime.GOOS, runtime.GOARCH, ext)
+	candidates := []string{
+		fmt.Sprintf("mindfs_%s_%s_%s%s", version, runtime.GOOS, runtime.GOARCH, ext),
+		fmt.Sprintf("mindfs_v%s_%s_%s%s", strings.TrimPrefix(version, "v"), runtime.GOOS, runtime.GOARCH, ext),
+	}
 	for _, asset := range release.Assets {
-		if strings.TrimSpace(asset.Name) == want {
-			return asset, nil
+		name := strings.TrimSpace(asset.Name)
+		for _, candidate := range candidates {
+			if name == candidate {
+				return asset, nil
+			}
 		}
 	}
-	return releaseAsset{}, fmt.Errorf("release asset not found for %s/%s", runtime.GOOS, runtime.GOARCH)
+	return releaseAsset{}, fmt.Errorf(
+		"release asset not found for %s/%s (candidates: %s)",
+		runtime.GOOS,
+		runtime.GOARCH,
+		strings.Join(candidates, ", "),
+	)
 }
 
 func (s *Service) downloadFile(ctx context.Context, url, dst string) error {
@@ -382,12 +404,8 @@ func (s *Service) restartInstalledBinary() error {
 	if strings.TrimSpace(exe) == "" {
 		return errors.New("current executable path unavailable")
 	}
-	cmd := exec.Command(exe, s.args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = nil
-	configureRestartCommand(cmd)
-	if err := cmd.Start(); err != nil {
+	log.Printf("[update] restart.begin exe=%s args=%q", exe, s.args)
+	if err := startReplacementProcess(exe, s.args, os.Stdout, os.Stderr); err != nil {
 		return err
 	}
 	go func() {

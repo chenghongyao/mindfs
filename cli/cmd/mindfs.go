@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +26,11 @@ import (
 )
 
 var version = "dev"
+
+const (
+	daemonEnvKey          = "MINDFS_DAEMON"
+	internalRestartEnvKey = "MINDFS_INTERNAL_RESTART"
+)
 
 func main() {
 	flag.Usage = func() {
@@ -37,6 +44,9 @@ func main() {
 		fmt.Fprintf(out, "\nExamples:\n")
 		fmt.Fprintf(out, "  mindfs\n")
 		fmt.Fprintf(out, "  mindfs /path/to/project\n")
+		fmt.Fprintf(out, "  mindfs --foreground\n")
+		fmt.Fprintf(out, "  mindfs --status\n")
+		fmt.Fprintf(out, "  mindfs --stop\n")
 		fmt.Fprintf(out, "  mindfs -web=true\n")
 		fmt.Fprintf(out, "  mindfs -addr :9000 /path/to/project\n")
 		fmt.Fprintf(out, "  mindfs -remove /path/to/project\n")
@@ -47,8 +57,17 @@ func main() {
 	webDir := flag.String("web-dir", "web", "web project directory")
 	staticDir := flag.String("static-dir", "web/dist", "directory for serving built web assets on the backend port")
 	noRelayer := flag.Bool("no-relayer", false, "disable relay integration")
+	foreground := flag.Bool("foreground", false, "run in the foreground instead of as a background service")
+	stop := flag.Bool("stop", false, "stop the background mindfs service")
+	restart := flag.Bool("restart", false, "restart the background mindfs service")
+	statusFlag := flag.Bool("status", false, "show background service status")
 	remove := flag.Bool("remove", false, "remove the managed directory")
 	flag.Parse()
+	internalRestart := os.Getenv(internalRestartEnvKey) == "1"
+	daemonMode := os.Getenv(daemonEnvKey) == "1"
+	if internalRestart {
+		log.Printf("[mindfs] internal restart detected addr=%s root_arg_count=%d", *addr, flag.NArg())
+	}
 
 	root := "."
 	if flag.NArg() > 0 {
@@ -58,6 +77,42 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
+	}
+	stateDir, err := ensureStateDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	pidPath, logPath, err := servicePaths(stateDir, *addr)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+
+	if *statusFlag {
+		if err := printServiceStatus(*addr, pidPath, logPath); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		return
+	}
+	if *stop {
+		if err := stopService(pidPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintln(os.Stdout, "mindfs service already stopped")
+				return
+			}
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout, "mindfs service stopped")
+		return
+	}
+	if *restart {
+		if err := stopService(pidPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
 	}
 
 	if *remove {
@@ -69,7 +124,7 @@ func main() {
 		return
 	}
 
-	if serverRunning(*addr) {
+	if !internalRestart && !*restart && serverRunning(*addr) {
 		fmt.Fprintf(os.Stdout, "server already running on %s, reusing existing process\n", *addr)
 		rootInfo, err := addManagedDir(*addr, absRoot)
 		if err != nil {
@@ -83,8 +138,36 @@ func main() {
 		return
 	}
 
+	if !*foreground && !daemonMode && !internalRestart {
+		if err := startBackgroundProcess(logPath); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		if err := waitForServer(*addr, 8*time.Second); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		rootInfo, err := addManagedDir(*addr, absRoot)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stdout, "mindfs service started")
+		fmt.Fprintln(os.Stdout, "added managed directory:", rootInfo.RootPath)
+		if err := openTarget(*addr, *web, rootInfo.ID); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+		}
+		fmt.Fprintf(os.Stdout, "logs: %s\n", logPath)
+		return
+	}
+
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if err := writePIDFile(pidPath); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+	defer removePIDFile(pidPath)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -115,8 +198,10 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if err := openTarget(*addr, *web, rootInfo.ID); err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
+	if !internalRestart && (*foreground || !daemonMode) {
+		if err := openTarget(*addr, *web, rootInfo.ID); err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+		}
 	}
 
 	select {
@@ -128,6 +213,147 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func ensureStateDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".local", "share", "mindfs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func servicePaths(stateDir, addr string) (string, string, error) {
+	logDir := filepath.Join(stateDir, "logs")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return "", "", err
+	}
+	key := sanitizeAddrForFile(addr)
+	return filepath.Join(stateDir, "mindfs-"+key+".pid"), filepath.Join(logDir, "mindfs-"+key+".log"), nil
+}
+
+func sanitizeAddrForFile(addr string) string {
+	if strings.TrimSpace(addr) == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range addr {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "default"
+	}
+	return b.String()
+}
+
+func startBackgroundProcess(logPath string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, os.Args[1:]...)
+	cmd.Env = append(cmd.Environ(), daemonEnvKey+"=1")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Stdin = nil
+	configureBackgroundCommand(cmd)
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return err
+	}
+	return logFile.Close()
+}
+
+func writePIDFile(pidPath string) error {
+	return os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+}
+
+func removePIDFile(pidPath string) {
+	_ = os.Remove(pidPath)
+}
+
+func readPIDFile(pidPath string) (int, error) {
+	raw, err := os.ReadFile(pidPath)
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		return 0, err
+	}
+	if pid <= 0 {
+		return 0, fmt.Errorf("invalid pid in %s", pidPath)
+	}
+	return pid, nil
+}
+
+func stopService(pidPath string) error {
+	pid, err := readPIDFile(pidPath)
+	if err != nil {
+		return err
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		return err
+	}
+	for i := 0; i < 50; i++ {
+		if !processExists(pid) {
+			_ = os.Remove(pidPath)
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out stopping process %d", pid)
+}
+
+func printServiceStatus(addr, pidPath, logPath string) error {
+	pid, err := readPIDFile(pidPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintln(os.Stdout, "mindfs status: stopped")
+			return nil
+		}
+		return err
+	}
+	running := processExists(pid) && serverRunning(addr)
+	if !running {
+		fmt.Fprintf(os.Stdout, "mindfs status: stale pid file (%d)\n", pid)
+		fmt.Fprintf(os.Stdout, "log file: %s\n", logPath)
+		return nil
+	}
+	fmt.Fprintln(os.Stdout, "mindfs status: running")
+	fmt.Fprintf(os.Stdout, "pid: %d\n", pid)
+	fmt.Fprintf(os.Stdout, "addr: %s\n", addrToURL(addr, ""))
+	fmt.Fprintf(os.Stdout, "log file: %s\n", logPath)
+	return nil
+}
+
+func processExists(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
 }
 
 func serverRunning(addr string) bool {

@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.
 
 Custom install path:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --prefix ~/.local
+curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --prefix your/path
 ```
 
 **Windows (PowerShell)**
@@ -93,7 +93,6 @@ The install script auto-detects your OS and architecture, then downloads the mat
 git clone https://github.com/a9gent/mindfs.git
 cd mindfs
 make build      # output: ./mindfs
-make build-all  # cross-compile all platforms into dist/
 ```
 
 ### Run

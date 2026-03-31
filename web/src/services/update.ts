@@ -6,6 +6,8 @@ export type UpdateState = {
   has_update?: boolean;
   status?: string;
   message?: string;
+  release_name?: string;
+  release_body?: string;
   release_url?: string;
   published_at?: string;
   last_checked_at?: string;

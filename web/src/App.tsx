@@ -75,6 +75,8 @@ function normalizeUpdateState(input: UpdateState | null | undefined): UpdateStat
     has_update: input?.has_update === true,
     status: input?.status || "idle",
     message: input?.message || "",
+    release_name: input?.release_name || "",
+    release_body: input?.release_body || "",
     release_url: input?.release_url || "",
     published_at: input?.published_at || "",
     last_checked_at: input?.last_checked_at || "",
@@ -86,18 +88,36 @@ function updateButtonLabel(state: UpdateState): string {
   const status = (state.status || "idle").toLowerCase();
   switch (status) {
     case "available":
-      return state.latest_version ? `Update to ${state.latest_version}` : "Update available";
+      if (state.current_version && state.latest_version) {
+        return `更新 ${state.current_version} → ${state.latest_version}`;
+      }
+      return state.latest_version ? `更新到 ${state.latest_version}` : "新版本";
     case "downloading":
-      return "Downloading...";
+      return "下载中...";
     case "installing":
-      return "Installing...";
+      return "安装中...";
     case "restarting":
-      return "Restarting...";
+      return "重启中...";
     case "failed":
-      return "Update failed";
+      return "更新失败";
     default:
-      return "Up to date";
+      return "已是最新";
   }
+}
+
+function updateSummaryText(state: UpdateState): string {
+  const body = String(state.release_body || "").trim();
+  if (body) {
+    return body;
+  }
+  const name = String(state.release_name || "").trim();
+  if (name) {
+    return name;
+  }
+  if (state.latest_version) {
+    return `发现 v${state.latest_version} 新版本`;
+  }
+  return "";
 }
 
 function shouldShowUpdateButton(state: UpdateState): boolean {
@@ -2643,53 +2663,18 @@ export function App() {
   const showUpdateButton = shouldShowUpdateButton(updateState);
   const updateBusy = updateSubmitting || ["downloading", "installing", "restarting"].includes((updateState.status || "").toLowerCase());
   const updateLabel = updateButtonLabel(updateState);
+  const updateHelp = updateState.message || updateSummaryText(updateState);
+  const updateSummary = updateSummaryText(updateState);
 
   return (
     <>
     <AppShell
       leftOpen={isLeftOpen} rightOpen={isRightOpen}
       onCloseLeft={() => setIsLeftOpen(false)} onCloseRight={() => setIsRightOpen(false)}
-      sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} showHiddenFiles={showHiddenFiles} onSortModeChange={setTreeSortMode} onShowHiddenFilesChange={setShowHiddenFiles} selectedDirKey={selectedDirKey} selectedPath={file?.path} rootId={currentRootId} creatingRootName={creatingRootName} creatingRootBusy={creatingRootBusy} onCreateRootStart={handleCreateRootStart} onCreateRootNameChange={setCreatingRootName} onCreateRootSubmit={() => { void handleCreateRootSubmit(); }} onCreateRootCancel={handleCreateRootCancel} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true, isRoot: e.is_root === true})} relayActionLabel={relayActionLabel} relayActionDisabled={relayActionDisabled} relayActionHelp={null} onRelayAction={handleRelayAction} />}
+      sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} showHiddenFiles={showHiddenFiles} onSortModeChange={setTreeSortMode} onShowHiddenFilesChange={setShowHiddenFiles} selectedDirKey={selectedDirKey} selectedPath={file?.path} rootId={currentRootId} creatingRootName={creatingRootName} creatingRootBusy={creatingRootBusy} onCreateRootStart={handleCreateRootStart} onCreateRootNameChange={setCreatingRootName} onCreateRootSubmit={() => { void handleCreateRootSubmit(); }} onCreateRootCancel={handleCreateRootCancel} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true, isRoot: e.is_root === true})} relayActionLabel={relayActionLabel} relayActionDisabled={relayActionDisabled} relayActionHelp={null} onRelayAction={handleRelayAction} updateActionLabel={showUpdateButton ? updateLabel : null} updateActionDisabled={updateBusy} updateActionHelp={showUpdateButton ? updateHelp : ""} updateActionBusy={updateBusy} updateActionSummary={showUpdateButton ? updateSummary : ""} onUpdateAction={() => { void handleStartUpdate(); }} />}
       rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} onDelete={handleDeleteSession} onLoadOlder={handleLoadOlderSessions} loadingOlder={loadingOlderSessions} hasMore={hasMoreSessions} />}
       main={
         <div style={{ width: "100%", flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
-          {showUpdateButton ? (
-            <div style={{ position: "absolute", top: "10px", right: "10px", zIndex: 120, display: "flex", alignItems: "center", gap: "8px" }}>
-              <button
-                type="button"
-                onClick={() => { void handleStartUpdate(); }}
-                disabled={updateBusy}
-                title={updateState.message || ""}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  padding: "8px 12px",
-                  borderRadius: "999px",
-                  border: "1px solid rgba(37, 99, 235, 0.25)",
-                  background: updateBusy ? "rgba(37, 99, 235, 0.12)" : "#2563eb",
-                  color: updateBusy ? "#1d4ed8" : "#fff",
-                  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.12)",
-                  cursor: updateBusy ? "default" : "pointer",
-                  fontSize: "12px",
-                  fontWeight: 600,
-                }}
-              >
-                {updateBusy ? (
-                  <span style={{
-                    width: "12px",
-                    height: "12px",
-                    borderRadius: "50%",
-                    border: "2px solid currentColor",
-                    borderRightColor: "transparent",
-                    display: "inline-block",
-                    animation: "mindfs-update-spin 0.9s linear infinite",
-                  }} />
-                ) : null}
-                <span>{updateLabel}</span>
-              </button>
-            </div>
-          ) : null}
           {!isMobile && <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>
             <button onClick={() => setIsLeftOpen(!isLeftOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isLeftOpen && !isMobile ? 0 : 1 }}>📁</button>
             <button onClick={() => setIsRightOpen(!isRightOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isRightOpen && !isMobile ? 0 : 1 }}>🕒</button>
@@ -2715,7 +2700,6 @@ export function App() {
       }} />}
       drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{drawerSessionSnapshot ? <SessionViewer session={drawerSessionSnapshot} rootId={currentRootId} rootPath={managedRootByIdRef.current[currentRootId || ""]?.root_path || null} interactionMode="drawer" onFileClick={handleDrawerSessionFileClick} /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
     />
-    <style>{`@keyframes mindfs-update-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </>
   );
 }

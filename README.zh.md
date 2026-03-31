@@ -78,7 +78,7 @@ curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.
 
 自定义安装路径：
 ```bash
-curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --prefix ~/.local
+curl -fsSL https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.sh | bash -s -- --prefix your/path
 ```
 
 **Windows（PowerShell）**
@@ -93,7 +93,6 @@ irm https://raw.githubusercontent.com/a9gent/mindfs/main/scripts/install.ps1 | i
 git clone https://github.com/a9gent/mindfs.git
 cd mindfs
 make build      # 产物为 ./mindfs
-make build-all  # 跨平台编译，产物在 dist/
 ```
 
 ### 启动

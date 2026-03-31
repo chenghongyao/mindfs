@@ -43,6 +43,12 @@ type FileTreeProps = {
   relayActionDisabled?: boolean;
   relayActionHelp?: string | null;
   onRelayAction?: () => void;
+  updateActionLabel?: string | null;
+  updateActionDisabled?: boolean;
+  updateActionHelp?: string | null;
+  updateActionBusy?: boolean;
+  updateActionSummary?: string | null;
+  onUpdateAction?: () => void;
 };
 
 const ChevronRight = ({ isOpen }: { isOpen: boolean }) => (
@@ -124,13 +130,21 @@ export function FileTree({
   relayActionDisabled = false,
   relayActionHelp = null,
   onRelayAction,
+  updateActionLabel = null,
+  updateActionDisabled = false,
+  updateActionHelp = null,
+  updateActionBusy = false,
+  updateActionSummary = null,
+  onUpdateAction,
 }: FileTreeProps) {
   const expandedSet = new Set(expanded);
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
+  const [isUpdateNotesOpen, setIsUpdateNotesOpen] = React.useState(false);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = React.useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = React.useState(false);
   const [isInstallCapable, setIsInstallCapable] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const updateNotesRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
   const previousCreatingRootNameRef = React.useRef<string | null>(null);
 
@@ -287,7 +301,13 @@ export function FileTree({
 
   const shouldShowInstallButton = !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
   const shouldShowInstallHelp = (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
-  const hasFooterContent = !!relayActionLabel || !!relayActionHelp || shouldShowInstallButton || shouldShowInstallHelp;
+  const hasFooterContent =
+    !!updateActionLabel ||
+    !!updateActionHelp ||
+    !!relayActionLabel ||
+    !!relayActionHelp ||
+    shouldShowInstallButton ||
+    shouldShowInstallHelp;
 
   const handleInstall = React.useCallback(async () => {
     if (isKnownInstalled) {
@@ -339,6 +359,29 @@ export function FileTree({
     }
     previousCreatingRootNameRef.current = creatingRootName;
   }, [creatingRootName]);
+
+  React.useEffect(() => {
+    if (!isUpdateNotesOpen || typeof document === "undefined") {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (updateNotesRef.current && !updateNotesRef.current.contains(event.target as Node)) {
+        setIsUpdateNotesOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [isUpdateNotesOpen]);
+
+  React.useEffect(() => {
+    if (!updateActionLabel || !updateActionSummary) {
+      setIsUpdateNotesOpen(false);
+    }
+  }, [updateActionLabel, updateActionSummary]);
 
   React.useEffect(() => {
     if (!isMenuOpen) {
@@ -627,6 +670,126 @@ export function FileTree({
           flexShrink: 0,
         }}
       >
+        {updateActionLabel ? (
+          <div ref={updateNotesRef} style={{ position: "relative" }}>
+            {isUpdateNotesOpen && updateActionSummary ? (
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  bottom: "calc(100% + 8px)",
+                  border: "1px solid var(--border-color)",
+                  background: "var(--panel-bg)",
+                  borderRadius: "12px",
+                  padding: "12px",
+                  boxShadow: "0 18px 36px rgba(15, 23, 42, 0.18)",
+                  fontSize: "11px",
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.55,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  maxHeight: "220px",
+                  overflow: "auto",
+                  zIndex: 10,
+                }}
+              >
+                {updateActionSummary}
+              </div>
+            ) : null}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "stretch",
+                width: "100%",
+                border: "1px solid var(--border-color)",
+                background: updateActionDisabled ? "rgba(148, 163, 184, 0.2)" : "var(--accent-color)",
+                color: updateActionDisabled ? "var(--text-secondary)" : "#fff",
+                borderRadius: "10px",
+                overflow: "hidden",
+              }}
+            >
+              <button
+                type="button"
+                disabled={updateActionDisabled}
+                onClick={() => onUpdateAction?.()}
+                title={updateActionHelp || undefined}
+                style={{
+                  flex: 1,
+                  border: "none",
+                  background: "transparent",
+                  color: "inherit",
+                  padding: "10px 12px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                  cursor: updateActionDisabled ? "not-allowed" : "pointer",
+                  fontSize: "12px",
+                  fontWeight: 600,
+                }}
+              >
+                {updateActionBusy ? (
+                  <span
+                    style={{
+                      width: "12px",
+                      height: "12px",
+                      borderRadius: "50%",
+                      border: "2px solid currentColor",
+                      borderRightColor: "transparent",
+                      display: "inline-block",
+                      animation: "mindfs-update-spin 0.9s linear infinite",
+                    }}
+                  />
+                ) : null}
+                <span>{updateActionLabel}</span>
+              </button>
+              {updateActionSummary ? (
+                <button
+                  type="button"
+                  aria-label={isUpdateNotesOpen ? "隐藏更新说明" : "显示更新说明"}
+                  aria-expanded={isUpdateNotesOpen}
+                  onClick={() => setIsUpdateNotesOpen((open) => !open)}
+                  style={{
+                    width: "34px",
+                    border: "none",
+                    background: isUpdateNotesOpen
+                      ? (updateActionDisabled ? "rgba(148, 163, 184, 0.12)" : "rgba(255, 255, 255, 0.14)")
+                      : "transparent",
+                    color: "inherit",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{
+                      transform: isUpdateNotesOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.15s ease",
+                    }}
+                  >
+                    <polyline points="6 15 12 9 18 15" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        {updateActionHelp && !updateActionLabel ? (
+          <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
+            {updateActionHelp}
+          </div>
+        ) : null}
         {shouldShowInstallButton ? (
           relayActionLabel ? (
             <button
@@ -716,6 +879,7 @@ export function FileTree({
           </div>
         ) : null}
       </div>
+      <style>{`@keyframes mindfs-update-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

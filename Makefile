@@ -23,7 +23,7 @@ help:
 		"  make start-server # backend entrypoint serving built static assets" \
 		"  make test         # run Go tests" \
 		"  make tag TAG=v1.2.3  # create and push a git tag" \
-		"  make release         # build-all then create GitHub release (requires gh)"
+		"  make release TAG=v1.2.3  # build-all then create GitHub release using release-notes/TAG.md"
 
 dev:
 	$(GO) run ./cli/cmd -web=true -addr $(ADDR) $(ROOT)
@@ -63,6 +63,7 @@ test:
 # ── Cross-platform distribution ──────────────────────────────────────────
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 DIST_DIR ?= dist
+RELEASE_NOTES_DIR ?= release-notes
 
 # Targets: OS/ARCH pairs
 PLATFORMS := \
@@ -91,10 +92,12 @@ tag:
 
 # Usage: make release TAG=v1.2.3
 # Builds all platforms and creates a GitHub release with all artifacts.
+# Requires $(RELEASE_NOTES_DIR)/$(TAG).md to exist.
 release: dist-clean build-all
 	@command -v gh >/dev/null 2>&1 || (echo "Error: gh (GitHub CLI) is required. https://cli.github.com" >&2; exit 1)
 	@test -n "$(TAG)" || (echo "Usage: make release TAG=v1.2.3" >&2; exit 1)
+	@test -f "$(RELEASE_NOTES_DIR)/$(TAG).md" || (echo "Error: release notes file not found: $(RELEASE_NOTES_DIR)/$(TAG).md" >&2; exit 1)
 	@echo "Creating GitHub release $(TAG)"
 	gh release create $(TAG) $(DIST_DIR)/*.tar.gz $(DIST_DIR)/*.zip \
 		--title "$(TAG)" \
-		--generate-notes
+		--notes-file "$(RELEASE_NOTES_DIR)/$(TAG).md"

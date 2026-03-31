@@ -2,8 +2,11 @@
 
 package update
 
-import "os/exec"
+import (
+	"io"
+)
 
-func configureRestartCommand(cmd *exec.Cmd) {
-	_ = cmd
+func startReplacementProcess(exe string, args []string, stdout, stderr io.Writer) error {
+	_, _, _, _ = exe, args, stdout, stderr
+	return nil
 }
