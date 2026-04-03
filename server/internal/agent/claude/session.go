@@ -71,11 +71,29 @@ func (r *Runtime) OpenSession(ctx context.Context, opts OpenOptions) (types.Sess
 		return nil, err
 	}
 
+	selectedModel := strings.TrimSpace(opts.Model)
+	if selectedModel == "" {
+		for _, model := range client.SupportedModelsFromInit() {
+			candidate := strings.TrimSpace(model.Value)
+			if candidate == "" {
+				continue
+			}
+			if err := stream.SetModel(ctx, candidate); err != nil {
+				_ = stream.Close()
+				_ = client.Close()
+				return nil, err
+			}
+			selectedModel = candidate
+			break
+		}
+	}
+
 	s := &session{
 		client:        client,
 		stream:        stream,
 		sessionID:     stream.SessionID(),
 		sessionKey:    opts.SessionKey,
+		model:         selectedModel,
 		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
 	}
 	go s.consumeMessages()
@@ -92,6 +110,7 @@ type session struct {
 	onUpdate   func(types.Event)
 	sessionID  string
 	sessionKey string
+	model      string
 
 	sendMu sync.Mutex
 	turnMu sync.Mutex
@@ -163,7 +182,19 @@ func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 		})
 	}
 	log.Printf("[agent/claude] models.cached session=%s count=%d", s.sessionKey, len(models))
-	return types.ModelList{Models: models}, nil
+	currentModelID := ""
+	if selected := strings.TrimSpace(s.model); selected != "" {
+		for _, item := range models {
+			if strings.TrimSpace(item.ID) == selected {
+				currentModelID = selected
+				break
+			}
+		}
+	}
+	return types.ModelList{
+		CurrentModelID: currentModelID,
+		Models:         models,
+	}, nil
 }
 
 func (s *session) ListCommands(ctx context.Context) (types.CommandList, error) {
