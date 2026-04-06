@@ -4,6 +4,12 @@ import { appURL, wsURL } from "./base";
 
 export type SessionType = "chat" | "plugin";
 
+export type RelatedFile = {
+  path: string;
+  relation?: string;
+  created_by_session?: boolean;
+};
+
 export type Session = {
   key: string;
   type: SessionType;
@@ -13,10 +19,7 @@ export type Session = {
   created_at: string;
   updated_at: string;
   closed_at?: string;
-  related_files?: Array<{
-    path: string;
-    action: string;
-  }>;
+  related_files?: RelatedFile[];
   exchanges?: Array<{
     seq?: number;
     role?: string;
@@ -396,6 +399,25 @@ class SessionService {
     }
   }
 
+  async getSessionRelatedFiles(rootId: string, sessionKey: string): Promise<RelatedFile[]> {
+    try {
+      const params = new URLSearchParams({
+        root: rootId,
+      });
+      const res = await fetch(
+        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}/related-files`, params)
+      );
+      if (!res.ok) {
+        throw new Error("Failed to get session related files");
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? (data as RelatedFile[]) : [];
+    } catch (err) {
+      console.error("[Session] Failed to get session related files:", err);
+      return [];
+    }
+  }
+
   async deleteSession(rootId: string, sessionKey: string): Promise<boolean> {
     try {
       const params = new URLSearchParams({ root: rootId });
@@ -566,6 +588,7 @@ export async function deleteCachedSession(rootId: string, sessionKey: string): P
 function cloneSession(session: Session): Session {
   return {
     ...session,
+    related_files: Array.isArray(session.related_files) ? [...session.related_files] : [],
     exchanges: Array.isArray(session.exchanges) ? [...session.exchanges] : [],
   };
 }
@@ -585,6 +608,19 @@ function toPersistentSession(session: Session): Session {
 export async function getCachedSession(rootId: string, sessionKey: string): Promise<Session | null> {
   const cached = await loadCachedSession(rootId, sessionKey);
   return cached ? cloneSession(cached) : null;
+}
+
+export async function setCachedSessionRelatedFiles(rootId: string, sessionKey: string, relatedFiles: RelatedFile[]): Promise<Session | null> {
+  const cached = await loadCachedSession(rootId, sessionKey);
+  if (!cached) {
+    return null;
+  }
+  const next: Session = {
+    ...cached,
+    related_files: Array.isArray(relatedFiles) ? [...relatedFiles] : [],
+  };
+  await saveCachedSession(rootId, next);
+  return cloneSession(next);
 }
 
 export async function syncSession(rootId: string, sessionKey: string): Promise<SyncSessionResult> {

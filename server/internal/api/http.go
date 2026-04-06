@@ -36,6 +36,19 @@ func (h *HTTPHandler) service() *usecase.Service {
 	return &usecase.Service{Registry: h.AppContext}
 }
 
+func (h *HTTPHandler) broadcastRootChanged(action, rootID string) {
+	if h.AppContext == nil {
+		return
+	}
+	h.AppContext.GetSessionStreamHub().BroadcastAll(WSResponse{
+		Type: "root.changed",
+		Payload: map[string]any{
+			"action":  action,
+			"root_id": rootID,
+		},
+	})
+}
+
 // Routes constructs the chi router with all endpoints.
 func (h *HTTPHandler) Routes() http.Handler {
 	r := chi.NewRouter()
@@ -47,6 +60,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Get("/api/candidates", h.handleCandidates)
 	r.Get("/api/sessions", h.handleSessions)
 	r.Get("/api/sessions/{key}", h.handleSessionGet)
+	r.Get("/api/sessions/{key}/related-files", h.handleSessionRelatedFilesGet)
 	r.Delete("/api/sessions/{key}", h.handleSessionDelete)
 	r.Get("/api/dirs", h.handleDirs)
 	r.Post("/api/dirs", h.handleAddDir)
@@ -145,6 +159,25 @@ func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
 		pendingUser = h.AppContext.GetSessionStreamHub().GetPendingUserExchange(key)
 	}
 	respondJSON(w, http.StatusOK, sessionResponse(out, pendingUser))
+}
+
+func (h *HTTPHandler) handleSessionRelatedFilesGet(w http.ResponseWriter, r *http.Request) {
+	rootID := r.URL.Query().Get("root")
+	key := chi.URLParam(r, "key")
+	if strings.TrimSpace(key) == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("session key required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.GetSessionRelatedFiles(r.Context(), usecase.GetSessionRelatedFilesInput{
+		RootID: rootID,
+		Key:    key,
+	})
+	if err != nil {
+		respondError(w, http.StatusNotFound, err)
+		return
+	}
+	respondJSON(w, http.StatusOK, out)
 }
 
 func (h *HTTPHandler) handleSessionDelete(w http.ResponseWriter, r *http.Request) {
@@ -537,7 +570,7 @@ func (h *HTTPHandler) handleAddDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.AppContext != nil {
-		h.AppContext.GetSessionStreamHub().BroadcastRootChanged("added", out.Dir.ID)
+		h.broadcastRootChanged("added", out.Dir.ID)
 	}
 	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
 }
@@ -555,7 +588,7 @@ func (h *HTTPHandler) handleRemoveDir(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.AppContext != nil {
-		h.AppContext.GetSessionStreamHub().BroadcastRootChanged("removed", out.Dir.ID)
+		h.broadcastRootChanged("removed", out.Dir.ID)
 	}
 	respondJSON(w, http.StatusOK, managedDirResponse(out.Dir))
 }

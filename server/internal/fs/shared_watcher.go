@@ -21,6 +21,7 @@ type SharedFileWatcher struct {
 	sessions      map[string]*sessionInfo
 	pendingWrites map[string]string
 	onFileChange  func(FileChangeEvent)
+	onRelatedFile func(RelatedFileEvent)
 
 	done chan struct{}
 }
@@ -38,6 +39,12 @@ type FileChangeEvent struct {
 	Path   string `json:"path"`
 	Op     string `json:"op"`
 	IsDir  bool   `json:"is_dir"`
+}
+
+type RelatedFileEvent struct {
+	RootID     string `json:"root_id"`
+	SessionKey string `json:"session_key"`
+	Path       string `json:"path"`
 }
 
 func NewSharedFileWatcher(root RootInfo, sessions SessionFileRecorder) (*SharedFileWatcher, error) {
@@ -107,13 +114,26 @@ func (sw *SharedFileWatcher) RecordSessionFile(sessionKey, filePath string) {
 	if len(relPath) >= len(".mindfs") && relPath[:len(".mindfs")] == ".mindfs" {
 		return
 	}
-	sw.sessionStore.RecordOutputFile(context.Background(), sessionKey, relPath)
+	if err := sw.sessionStore.RecordOutputFile(context.Background(), sessionKey, relPath); err != nil {
+		return
+	}
 	sw.root.UpdateFileMeta(relPath, sessionKey, "agent")
+	sw.emitRelatedFile(RelatedFileEvent{
+		RootID:     sw.root.ID,
+		SessionKey: sessionKey,
+		Path:       relPath,
+	})
 }
 
 func (sw *SharedFileWatcher) SetOnFileChange(handler func(FileChangeEvent)) {
 	sw.mu.Lock()
 	sw.onFileChange = handler
+	sw.mu.Unlock()
+}
+
+func (sw *SharedFileWatcher) SetOnRelatedFile(handler func(RelatedFileEvent)) {
+	sw.mu.Lock()
+	sw.onRelatedFile = handler
 	sw.mu.Unlock()
 }
 
@@ -217,6 +237,15 @@ func (sw *SharedFileWatcher) resolveSessionKey(relPath string) string {
 func (sw *SharedFileWatcher) emitFileChange(change FileChangeEvent) {
 	sw.mu.RLock()
 	handler := sw.onFileChange
+	sw.mu.RUnlock()
+	if handler != nil {
+		handler(change)
+	}
+}
+
+func (sw *SharedFileWatcher) emitRelatedFile(change RelatedFileEvent) {
+	sw.mu.RLock()
+	handler := sw.onRelatedFile
 	sw.mu.RUnlock()
 	if handler != nil {
 		handler(change)

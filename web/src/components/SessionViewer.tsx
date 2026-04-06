@@ -6,13 +6,7 @@ import { AgentIcon } from "./AgentIcon";
 import { InlineTokenText } from "./InlineTokenText";
 import { MarkdownViewer } from "./MarkdownViewer";
 import { appURL } from "../services/base";
-import type { ToolCall } from "../services/session";
-
-type RelatedFile = {
-  path: string;
-  name: string;
-  created_at?: string;
-};
+import type { RelatedFile, ToolCall } from "../services/session";
 
 type SessionItem = {
   key?: string;
@@ -24,7 +18,7 @@ type SessionItem = {
   purpose?: string;
   exchanges?: Array<{ role?: string; agent?: string; content?: string; timestamp?: string }>;
   closed_at?: string;
-  related_files?: Array<RelatedFile | { path: string; relation?: string; created_by_session?: boolean }>;
+  related_files?: RelatedFile[];
 };
 
 type SessionViewerProps = {
@@ -337,7 +331,7 @@ function SessionViewerInner({ session, rootId, rootPath, interactionMode = "main
 
             {/* 关联文件区域 */}
             {relatedFiles.length > 0 && (
-              <div style={{ marginTop: "4px", width: "100%", boxSizing: "border-box" }}>
+              <div style={{ marginTop: "18px", paddingTop: "14px", borderTop: "1px solid var(--border-color)", width: "100%", boxSizing: "border-box" }}>
                 <div style={{ fontSize: "12px", fontWeight: 500, color: "var(--text-secondary)", marginBottom: "6px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                   <span>关联文件 {relatedFiles.length}</span>
                   {hasMoreFiles && <button type="button" onClick={() => setShowAllFiles(!showAllFiles)} style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--text-secondary)", fontSize: "11px" }}>{showAllFiles ? "收起" : "更多"}</button>}

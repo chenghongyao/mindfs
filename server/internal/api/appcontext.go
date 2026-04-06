@@ -26,11 +26,12 @@ type AppContext struct {
 	Relay  *relay.Manager
 	Update *update.Service
 
-	mu                  sync.RWMutex
-	roots               map[string]*RootContext // root id -> root context
-	fileChangeListeners []func(fs.FileChangeEvent)
-	streamHub           *StreamHub
-	candidateRegistry   *usecase.CandidateRegistry
+	mu                   sync.RWMutex
+	roots                map[string]*RootContext // root id -> root context
+	fileChangeListeners  []func(fs.FileChangeEvent)
+	relatedFileListeners []func(fs.RelatedFileEvent)
+	streamHub            *StreamHub
+	candidateRegistry    *usecase.CandidateRegistry
 }
 
 func (s *AppContext) GetRootContext(rootID string) (*RootContext, error) {
@@ -110,6 +111,7 @@ func (s *AppContext) GetFileWatcher(rootID string, manager *session.Manager) (*f
 		return nil, err
 	}
 	watcher.SetOnFileChange(s.emitFileChange)
+	watcher.SetOnRelatedFile(s.emitRelatedFile)
 	rootCtx.Watcher = watcher
 	return watcher, nil
 }
@@ -201,9 +203,27 @@ func (s *AppContext) AddFileChangeListener(listener func(fs.FileChangeEvent)) {
 	s.mu.Unlock()
 }
 
+func (s *AppContext) AddRelatedFileListener(listener func(fs.RelatedFileEvent)) {
+	if listener == nil {
+		return
+	}
+	s.mu.Lock()
+	s.relatedFileListeners = append(s.relatedFileListeners, listener)
+	s.mu.Unlock()
+}
+
 func (s *AppContext) emitFileChange(change fs.FileChangeEvent) {
 	s.mu.RLock()
 	listeners := append([]func(fs.FileChangeEvent){}, s.fileChangeListeners...)
+	s.mu.RUnlock()
+	for _, listener := range listeners {
+		listener(change)
+	}
+}
+
+func (s *AppContext) emitRelatedFile(change fs.RelatedFileEvent) {
+	s.mu.RLock()
+	listeners := append([]func(fs.RelatedFileEvent){}, s.relatedFileListeners...)
 	s.mu.RUnlock()
 	for _, listener := range listeners {
 		listener(change)

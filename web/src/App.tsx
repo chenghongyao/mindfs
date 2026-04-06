@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getViewModeSystemPrompt } from "./renderer/viewCatalog";
 import { Renderer } from "./renderer/Renderer";
-import { deleteCachedSession, getCachedSession, sessionService, syncSession, type Session } from "./services/session";
+import { deleteCachedSession, getCachedSession, sessionService, setCachedSessionRelatedFiles, syncSession, type RelatedFile, type Session } from "./services/session";
 import { buildClientContext } from "./services/context";
 import { reportError } from "./services/error";
 import { fetchFile, getCachedFile, invalidateFileCache, type FilePayload } from "./services/file";
@@ -27,7 +27,7 @@ import { BottomSheet } from "./components/BottomSheet";
 
 // 类型定义
 type SessionMode = "chat" | "plugin";
-export type SessionItem = { key?: string; session_key?: string; root_id?: string; name?: string; type?: SessionMode; agent?: string; model?: string; scope?: string; purpose?: string; created_at?: string; updated_at?: string; closed_at?: string; related_files?: Array<{ path: string; name?: string }>; exchanges?: Array<{ role?: string; content?: string; timestamp?: string; model?: string }>; pending?: boolean; };
+export type SessionItem = { key?: string; session_key?: string; root_id?: string; name?: string; type?: SessionMode; agent?: string; model?: string; scope?: string; purpose?: string; created_at?: string; updated_at?: string; closed_at?: string; related_files?: RelatedFile[]; exchanges?: Array<{ role?: string; content?: string; timestamp?: string; model?: string }>; pending?: boolean; };
 type Exchange = { role: string; agent?: string; model?: string; content?: string; timestamp?: string; toolCall?: any; };
 type PendingSend = { rootId: string; mode: SessionMode; agent: string; model?: string; message: string; timestamp: string; };
 type ViewerSelection = {
@@ -860,6 +860,30 @@ export function App() {
       return { ...(prev as any), pending } as SessionItem;
     });
   }, []);
+
+  const updateSessionRelatedFilesForKey = useCallback((rootID: string, sessionKey: string, relatedFiles: RelatedFile[]) => {
+    if (!rootID || !sessionKey) return;
+    const cacheKey = rootSessionKey(rootID, sessionKey);
+    const cached = sessionCacheRef.current[cacheKey];
+    const nextRelatedFiles = Array.isArray(relatedFiles) ? [...relatedFiles] : [];
+    if (cached) {
+      sessionCacheRef.current[cacheKey] = {
+        ...(cached as any),
+        related_files: nextRelatedFiles,
+      } as Session;
+    }
+    setSelectedSession((prev) => {
+      const prevKey = prev?.key || prev?.session_key;
+      const prevRoot = (prev?.root_id as string | undefined) || currentRootIdRef.current;
+      if (!prev || prevKey !== sessionKey || prevRoot !== rootID) return prev;
+      return { ...(prev as any), related_files: nextRelatedFiles } as SessionItem;
+    });
+    const current = drawerSessionByRootRef.current[rootID];
+    if (current && current.key === sessionKey) {
+      setDrawerSessionForRoot(rootID, { ...(current as any), related_files: nextRelatedFiles } as Session);
+    }
+    bumpCacheVersion();
+  }, [rootSessionKey, setDrawerSessionForRoot, bumpCacheVersion]);
 
   const updateSessionAgentForKey = useCallback((rootID: string, sessionKey: string, agent: string, model?: string) => {
     if (!rootID || !sessionKey || !agent) return;
@@ -1987,6 +2011,13 @@ export function App() {
       }
       await sessionService.markSessionReady(rootID, sessionKey);
     };
+    const refreshSessionRelatedFiles = async (rootID: string, sessionKey: string) => {
+      if (!rootID || !sessionKey) return;
+      const relatedFiles = await sessionService.getSessionRelatedFiles(rootID, sessionKey);
+      if (cancelled) return;
+      await setCachedSessionRelatedFiles(rootID, sessionKey, relatedFiles);
+      updateSessionRelatedFilesForKey(rootID, sessionKey, relatedFiles);
+    };
     const handleSessionStreamDone = (rootID: string, sessionKey: string) => {
       const cacheKey = rootSessionKey(rootID, sessionKey);
       const wasCanceled = !!cancelRequestedBySessionRef.current[cacheKey];
@@ -2221,6 +2252,14 @@ export function App() {
             void loadSessions(rootID, newest ? { afterTime: newest } : { replace: true });
           }
           break;
+        case "session.related_files.updated": {
+          const rootID = typeof payload?.root_id === "string" ? payload.root_id : "";
+          const sessionKey = typeof payload?.session_key === "string" ? payload.session_key : "";
+          if (rootID && sessionKey) {
+            void refreshSessionRelatedFiles(rootID, sessionKey);
+          }
+          break;
+        }
         case "file.changed": handleFileChanged(payload); break;
         case "agent.status.changed": setAgentsVersion(v => v + 1); break;
         case "app.update":
@@ -2233,7 +2272,7 @@ export function App() {
       cancelled = true;
       unsubscribeEvents();
     };
-  }, [currentRootId, mergeSessionItems, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir, refreshCurrentFileContent, refreshManagedRoots]);
+  }, [currentRootId, mergeSessionItems, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir, refreshCurrentFileContent, refreshManagedRoots, updateSessionRelatedFilesForKey]);
 
   useEffect(() => {
     if (!currentRootId) return;

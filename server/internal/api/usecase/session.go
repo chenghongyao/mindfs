@@ -92,6 +92,26 @@ func (s *Service) GetSession(ctx context.Context, in GetSessionInput) (*session.
 	return manager.Get(ctx, in.Key, in.Seq)
 }
 
+type GetSessionRelatedFilesInput struct {
+	RootID string
+	Key    string
+}
+
+func (s *Service) GetSessionRelatedFiles(ctx context.Context, in GetSessionRelatedFilesInput) ([]session.RelatedFile, error) {
+	if err := s.ensureRegistry(); err != nil {
+		return nil, err
+	}
+	manager, err := s.Registry.GetSessionManager(in.RootID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := manager.Get(ctx, in.Key, 0)
+	if err != nil {
+		return nil, err
+	}
+	return append([]session.RelatedFile(nil), current.RelatedFiles...), nil
+}
+
 type CloseSessionInput struct {
 	RootID string
 	Key    string

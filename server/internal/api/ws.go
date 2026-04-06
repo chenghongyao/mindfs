@@ -28,10 +28,11 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return
 
 // WSHandler manages JSON-RPC over WebSocket.
 type WSHandler struct {
-	AppContext *AppContext
-	fileOnce   sync.Once
-	proberOnce sync.Once
-	updateOnce sync.Once
+	AppContext      *AppContext
+	fileOnce        sync.Once
+	relatedFileOnce sync.Once
+	proberOnce      sync.Once
+	updateOnce      sync.Once
 }
 
 type StreamEvent struct {
@@ -44,6 +45,11 @@ func (h *WSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.fileOnce.Do(func() {
 		if h.AppContext != nil {
 			h.AppContext.AddFileChangeListener(h.broadcastFileChange)
+		}
+	})
+	h.relatedFileOnce.Do(func() {
+		if h.AppContext != nil {
+			h.AppContext.AddRelatedFileListener(h.broadcastRelatedFileChange)
 		}
 	})
 	h.proberOnce.Do(func() {
@@ -121,6 +127,38 @@ func (h *WSHandler) broadcastFileChange(change fs.FileChangeEvent) {
 			"path":    change.Path,
 			"op":      change.Op,
 			"is_dir":  change.IsDir,
+		},
+	}
+	h.broadcastWS(resp)
+}
+
+func (h *WSHandler) broadcastRelatedFileChange(change fs.RelatedFileEvent) {
+	resp := WSResponse{
+		Type: "session.related_files.updated",
+		Payload: map[string]any{
+			"root_id":     change.RootID,
+			"session_key": change.SessionKey,
+			"path":        change.Path,
+		},
+	}
+	h.broadcastWS(resp)
+}
+
+func (h *WSHandler) broadcastSessionMetaUpdated(rootID string, sess *session.Session) {
+	if sess == nil {
+		h.broadcastWS(WSResponse{Type: "session.meta.updated"})
+		return
+	}
+	resp := WSResponse{
+		Type: "session.meta.updated",
+		Payload: map[string]any{
+			"root_id": rootID,
+			"session": map[string]any{
+				"key":        sess.Key,
+				"name":       sess.Name,
+				"model":      sess.Model,
+				"updated_at": sess.UpdatedAt,
+			},
 		},
 	}
 	h.broadcastWS(resp)
@@ -232,7 +270,7 @@ func (h *WSHandler) handleSessionMessage(ctx context.Context, conn *websocket.Co
 				return
 			}
 			log.Printf("[session-name] async.broadcast root=%s session=%s name=%q", rootID, sessionKey, updated.Name)
-			h.AppContext.GetSessionStreamHub().BroadcastSessionMetaUpdated(rootID, updated)
+			h.broadcastSessionMetaUpdated(rootID, updated)
 		}(rootID, key, agentName, content)
 	}
 	if h.AppContext != nil {
