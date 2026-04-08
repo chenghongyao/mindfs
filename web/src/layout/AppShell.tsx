@@ -173,10 +173,6 @@ export function AppShell({
   const mobileFooterStyle: React.CSSProperties = {
     ...footerStyle,
     flexShrink: 0,
-    transform: viewportRect.keyboardInset > 0
-      ? `translateY(-${viewportRect.keyboardInset}px)`
-      : undefined,
-    willChange: viewportRect.keyboardInset > 0 ? "transform" : undefined,
   };
 
   return (
@@ -225,7 +221,7 @@ export function AppShell({
   );
 }
 
-function getVisibleViewportRect(): { keyboardInset: number; keyboardOpen: boolean } {
+function getVisibleViewportRect(): { keyboardOpen: boolean } {
   const visualViewport = window.visualViewport;
   if (visualViewport) {
     const rawInset = window.innerHeight - visualViewport.height - visualViewport.offsetTop;
@@ -235,9 +231,8 @@ function getVisibleViewportRect(): { keyboardInset: number; keyboardOpen: boolea
       window.innerHeight - visualViewport.height > 80 ||
       document.documentElement.clientHeight - visualViewport.height > 80;
     return {
-      keyboardInset: keyboardOpen ? keyboardInset : 0,
       keyboardOpen,
     };
   }
-  return { keyboardInset: 0, keyboardOpen: false };
+  return { keyboardOpen: false };
 }
