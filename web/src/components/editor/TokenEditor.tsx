@@ -553,7 +553,7 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
                   ? `12px ${rightInset}px 12px 14px`
                   : `8px ${rightInset}px ${bottomInset}px 14px`,
                 outline: "none",
-                fontSize: "15px",
+                fontSize: "16px",
                 lineHeight: "20px",
                 boxSizing: "border-box",
                 whiteSpace: "pre-wrap",
@@ -575,7 +575,7 @@ const TokenEditor = forwardRef<TokenEditorHandle, TokenEditorProps>(function Tok
                   top: "50%",
                   transform: "translateY(-50%)",
                   color: "var(--text-secondary)",
-                  fontSize: "15px",
+                  fontSize: "16px",
                   pointerEvents: "none",
                   zIndex: 1,
                   whiteSpace: "nowrap",

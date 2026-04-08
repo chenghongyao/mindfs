@@ -113,25 +113,31 @@ export function AppShell({
   const sidebarWidth = isMobile ? "0px" : (isTablet ? "200px" : "260px");
   const rightWidth = isMobile ? "0px" : (rightSidebar ? (isTablet ? "240px" : "280px") : "0px");
 
-  const shellStyle: React.CSSProperties = {
+  const shellStyle: React.CSSProperties & {
+    "--mindfs-actionbar-bottom-padding"?: string;
+  } = {
     display: isMobile ? "flex" : "grid",
     flexDirection: isMobile ? "column" : undefined,
     gridTemplateColumns: isMobile ? undefined : `${leftOpen ? sidebarWidth : "0px"} 1fr ${rightOpen ? rightWidth : "0px"}`,
     gridTemplateRows: isMobile ? undefined : "1fr auto",
     gridTemplateAreas: isMobile ? undefined : `"sidebar main right" "sidebar footer right"`,
-    minHeight: isMobile ? `${viewportRect.height}px` : "100vh",
-    height: isMobile ? `${viewportRect.height}px` : "100dvh",
+    minHeight: isMobile ? "100%" : "100vh",
+    height: isMobile ? "100%" : "100dvh",
     background: "var(--bg-gradient-start, #f3f4f6)",
     color: "var(--text-primary)",
     position: isMobile ? "fixed" : "relative",
-    top: isMobile ? `${viewportRect.offsetTop}px` : undefined,
+    top: isMobile ? 0 : undefined,
     left: isMobile ? 0 : undefined,
     right: isMobile ? 0 : undefined,
-    width: isMobile ? "100vw" : undefined,
+    width: isMobile ? "100%" : undefined,
+    maxWidth: isMobile ? "100%" : undefined,
     overflow: "hidden",
     isolation: "isolate",
     boxSizing: "border-box",
     transition: "grid-template-columns 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+    "--mindfs-actionbar-bottom-padding": viewportRect.keyboardOpen
+      ? "2px"
+      : "calc(env(safe-area-inset-bottom, 0px) + 2px)",
   };
 
   const mobileSidebarStyle = (side: 'left' | 'right'): React.CSSProperties => ({
@@ -148,7 +154,7 @@ export function AppShell({
     flexDirection: "column",
     willChange: "transform",
     backfaceVisibility: "hidden",
-    transform: `${side === 'left' ? (leftOpen ? "translateX(0)" : "translateX(-100%)") : (rightOpen ? "translateX(0)" : "translateX(100%)")} translateZ(0)`,
+    transform: "translateX(0) translateZ(0)",
   });
 
   const overlayStyle: React.CSSProperties = {
@@ -164,13 +170,24 @@ export function AppShell({
     transform: "translateZ(0)",
   };
 
+  const mobileFooterStyle: React.CSSProperties = {
+    ...footerStyle,
+    flexShrink: 0,
+    transform: viewportRect.keyboardInset > 0
+      ? `translateY(-${viewportRect.keyboardInset}px)`
+      : undefined,
+    willChange: viewportRect.keyboardInset > 0 ? "transform" : undefined,
+  };
+
   return (
     <div style={shellStyle}>
       {isMobile && <div style={overlayStyle} onClick={() => { onCloseLeft?.(); onCloseRight?.(); }} />}
 
-      <aside style={isMobile ? mobileSidebarStyle('left') : sidebarStyle}>
-        {sidebar}
-      </aside>
+      {(!isMobile || leftOpen) ? (
+        <aside style={isMobile ? mobileSidebarStyle('left') : sidebarStyle}>
+          {sidebar}
+        </aside>
+      ) : null}
 
       <main
         style={
@@ -189,17 +206,16 @@ export function AppShell({
         {drawer}
       </main>
 
-      <aside style={isMobile ? mobileSidebarStyle('right') : rightStyle}>
-        {rightSidebar}
-      </aside>
+      {(!isMobile || rightOpen) ? (
+        <aside style={isMobile ? mobileSidebarStyle('right') : rightStyle}>
+          {rightSidebar}
+        </aside>
+      ) : null}
 
       <footer
         style={
           isMobile
-            ? {
-                ...footerStyle,
-                flexShrink: 0,
-              }
+            ? mobileFooterStyle
             : footerStyle
         }
       >
@@ -209,13 +225,19 @@ export function AppShell({
   );
 }
 
-function getVisibleViewportRect(): { height: number; offsetTop: number } {
+function getVisibleViewportRect(): { keyboardInset: number; keyboardOpen: boolean } {
   const visualViewport = window.visualViewport;
   if (visualViewport) {
+    const rawInset = window.innerHeight - visualViewport.height - visualViewport.offsetTop;
+    const keyboardInset = Math.max(0, Math.round(rawInset));
+    const keyboardOpen =
+      keyboardInset > 80 ||
+      window.innerHeight - visualViewport.height > 80 ||
+      document.documentElement.clientHeight - visualViewport.height > 80;
     return {
-      height: Math.max(320, Math.round(visualViewport.height)),
-      offsetTop: Math.max(0, Math.round(visualViewport.offsetTop)),
+      keyboardInset: keyboardOpen ? keyboardInset : 0,
+      keyboardOpen,
     };
   }
-  return { height: window.innerHeight, offsetTop: 0 };
+  return { keyboardInset: 0, keyboardOpen: false };
 }
