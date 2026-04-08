@@ -1,4 +1,5 @@
 import { appURL } from "./base";
+import { getCachedGitDiff, setCachedGitDiff, type CachedGitDiffPayload } from "./file";
 
 export type GitStatusCode = "M" | "A" | "D" | "R" | "??";
 
@@ -18,20 +19,12 @@ export type GitStatusPayload = {
   items: GitStatusItem[];
 };
 
-export type GitDiffPayload = {
+export type GitDiffPayload = CachedGitDiffPayload & {
   path: string;
   status: GitStatusCode | string;
   additions: number;
   deletions: number;
   content: string;
-  file_meta?: Array<{
-    source_session: string;
-    session_name?: string;
-    agent?: string;
-    created_at?: string;
-    updated_at?: string;
-    created_by?: string;
-  }>;
 };
 
 export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> {
@@ -48,13 +41,35 @@ export async function fetchGitStatus(rootId: string): Promise<GitStatusPayload> 
   };
 }
 
-export async function fetchGitDiff(rootId: string, path: string): Promise<GitDiffPayload> {
+export function buildGitDiffCacheSignature(item?: Partial<GitStatusItem> | null): string {
+  if (!item) {
+    return "";
+  }
+  return [
+    item.status || "",
+    item.old_path || "",
+    Number(item.additions) || 0,
+    Number(item.deletions) || 0,
+  ].join(":");
+}
+
+export async function fetchGitDiff(
+  rootId: string,
+  path: string,
+  options?: { cacheSignature?: string },
+): Promise<GitDiffPayload> {
+  const cacheSignature = options?.cacheSignature || "";
+  const cached = await getCachedGitDiff(rootId, path, cacheSignature);
+  if (cached) {
+    return cached as GitDiffPayload;
+  }
+
   const response = await fetch(appURL("/api/git/diff", new URLSearchParams({ root: rootId, path })));
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(String(payload?.message || payload?.error || `Failed to fetch git diff: status=${response.status}`));
   }
-  return {
+  const diff = {
     path: typeof payload?.path === "string" ? payload.path : path,
     status: typeof payload?.status === "string" ? payload.status : "M",
     additions: Number(payload?.additions) || 0,
@@ -62,4 +77,6 @@ export async function fetchGitDiff(rootId: string, path: string): Promise<GitDif
     content: typeof payload?.content === "string" ? payload.content : "",
     file_meta: Array.isArray(payload?.file_meta) ? payload.file_meta : [],
   };
+  await setCachedGitDiff(rootId, path, diff, cacheSignature);
+  return diff;
 }

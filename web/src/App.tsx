@@ -5,7 +5,7 @@ import { deleteCachedSession, getCachedSession, sessionService, setCachedSession
 import { buildClientContext } from "./services/context";
 import { reportError } from "./services/error";
 import { fetchFile, getCachedFile, invalidateFileCache, type FilePayload } from "./services/file";
-import { fetchGitDiff, fetchGitStatus, type GitDiffPayload, type GitStatusItem, type GitStatusPayload } from "./services/git";
+import { buildGitDiffCacheSignature, fetchGitDiff, fetchGitStatus, type GitDiffPayload, type GitStatusItem, type GitStatusPayload } from "./services/git";
 import {
   DEFAULT_DIRECTORY_SORT_MODE,
   type DirectorySortMode,
@@ -1152,7 +1152,7 @@ export function App() {
     setGitDiff(null);
     replaceURLState({ root: rootID, file: "", session: "", cursor: 0, pluginQuery: {} });
     try {
-      const next = await fetchGitDiff(rootID, item.path);
+      const next = await fetchGitDiff(rootID, item.path, { cacheSignature: buildGitDiffCacheSignature(item) });
       setGitDiff(next);
       if (currentRootIdRef.current !== rootID) {
         setCurrentRootId(rootID);
@@ -2346,7 +2346,7 @@ export function App() {
             setGitDiff(null);
             return;
           }
-          void fetchGitDiff(rootID, changedDiffPath).then(setGitDiff).catch((err) => {
+          void fetchGitDiff(rootID, changedDiffPath, { cacheSignature: buildGitDiffCacheSignature(target) }).then(setGitDiff).catch((err) => {
             console.error("[git.diff.refresh] failed", { rootID, changedPath: changedDiffPath, err });
           });
         }

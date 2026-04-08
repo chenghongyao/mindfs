@@ -28,6 +28,7 @@ type FetchFileParams = {
 };
 
 type CachedFileRecord = {
+  type?: "file";
   key: string;
   rootId: string;
   path: string;
@@ -36,6 +37,33 @@ type CachedFileRecord = {
   touchedAt: number;
   file: FilePayload;
 };
+
+export type CachedGitDiffPayload = {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  content: string;
+  file_meta?: Array<{
+    source_session: string;
+    session_name?: string;
+    agent?: string;
+    created_at?: string;
+    updated_at?: string;
+    created_by?: string;
+  }>;
+};
+
+type CachedGitDiffRecord = {
+  type: "git-diff";
+  key: string;
+  rootId: string;
+  path: string;
+  touchedAt: number;
+  diff: CachedGitDiffPayload;
+};
+
+type CacheRecord = CachedFileRecord | CachedGitDiffRecord;
 
 type FileResponse = {
   file?: FilePayload | null;
@@ -50,10 +78,19 @@ const LS_MAX_RECORD_BYTES = 256 * 1024;
 const LS_MAX_RECORDS = 50;
 
 const memoryCache = new Map<string, FilePayload>();
+const gitDiffMemoryCache = new Map<string, CachedGitDiffPayload>();
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function buildCacheKey(rootId: string, path: string, readMode: ReadMode, cursor: number): string {
   return [rootId, path, readMode, String(cursor)].join("::");
+}
+
+function buildGitDiffCacheKey(rootId: string, path: string, signature?: string): string {
+  return ["git-diff", rootId, path, signature || ""].join("::");
+}
+
+function buildGitDiffCacheKeyPrefix(rootId: string, path: string): string {
+  return `git-diff::${rootId}::${path}::`;
 }
 
 function buildCacheKeyPrefix(rootId: string, path: string): string {
@@ -233,21 +270,22 @@ async function loadCachedRecord(cacheKey: string): Promise<CachedFileRecord | nu
   }
   try {
     const record = await withStore("readonly", (store) =>
-      requestToPromise(store.get(cacheKey) as IDBRequest<CachedFileRecord | undefined>),
+      requestToPromise(store.get(cacheKey) as IDBRequest<CacheRecord | undefined>),
     );
-    return record || null;
+    return record?.type === "git-diff" ? null : record || null;
   } catch {
     return null;
   }
 }
 
-async function listCachedRecords(): Promise<CachedFileRecord[]> {
+async function loadCachedGitDiffRecord(cacheKey: string): Promise<CachedGitDiffRecord | null> {
   try {
-    return await withStore("readonly", (store) =>
-      requestToPromise(store.getAll() as IDBRequest<CachedFileRecord[]>),
+    const record = await withStore("readonly", (store) =>
+      requestToPromise(store.get(cacheKey) as IDBRequest<CacheRecord | undefined>),
     );
+    return record?.type === "git-diff" ? record : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -259,17 +297,28 @@ async function saveCachedRecord(record: CachedFileRecord): Promise<void> {
   }
 }
 
-async function deleteCachedRecords(match: (record: CachedFileRecord) => boolean): Promise<void> {
+async function saveCachedGitDiffRecord(record: CachedGitDiffRecord): Promise<void> {
+  try {
+    await withStore("readwrite", (store) => requestToPromise(store.put(record)));
+  } catch {
+  }
+}
+
+async function deleteCachedRecords(match: (record: CacheRecord) => boolean): Promise<void> {
   try {
     await withStore("readwrite", async (store) => {
-      const entries = (await requestToPromise(store.getAll() as IDBRequest<CachedFileRecord[]>)) || [];
+      const entries = (await requestToPromise(store.getAll() as IDBRequest<CacheRecord[]>)) || [];
       entries.forEach((entry) => {
         if (!match(entry)) {
           return;
         }
         store.delete(entry.key);
-        memoryCache.delete(entry.key);
-        removeCachedRecordFromLocalStorage(entry.key);
+        if (entry.type === "git-diff") {
+          gitDiffMemoryCache.delete(entry.key);
+        } else {
+          memoryCache.delete(entry.key);
+          removeCachedRecordFromLocalStorage(entry.key);
+        }
       });
     });
   } catch {
@@ -279,7 +328,7 @@ async function deleteCachedRecords(match: (record: CachedFileRecord) => boolean)
 async function pruneCache(): Promise<void> {
   try {
     await withStore("readwrite", async (store) => {
-      const entries = (await requestToPromise(store.getAll() as IDBRequest<CachedFileRecord[]>)) || [];
+      const entries = (await requestToPromise(store.getAll() as IDBRequest<CacheRecord[]>)) || [];
       if (entries.length <= MAX_CACHE_ENTRIES) {
         return;
       }
@@ -288,8 +337,12 @@ async function pruneCache(): Promise<void> {
         .slice(0, entries.length - MAX_CACHE_ENTRIES)
         .forEach((entry) => {
           store.delete(entry.key);
-          memoryCache.delete(entry.key);
-          removeCachedRecordFromLocalStorage(entry.key);
+          if (entry.type === "git-diff") {
+            gitDiffMemoryCache.delete(entry.key);
+          } else {
+            memoryCache.delete(entry.key);
+            removeCachedRecordFromLocalStorage(entry.key);
+          }
         });
     });
   } catch {
@@ -307,6 +360,9 @@ function clearSiblingMemoryCaches(rootId: string, path: string, keepKey: string)
 
 async function clearSiblingPersistentCaches(rootId: string, path: string, keepKey: string): Promise<void> {
   await deleteCachedRecords((record) => {
+    if (record.type === "git-diff") {
+      return false;
+    }
     if (record.key === keepKey) {
       return false;
     }
@@ -324,6 +380,7 @@ async function persistExactCache(
 ): Promise<void> {
   writeMemoryCache(cacheKey, file);
   await saveCachedRecord({
+    type: "file",
     key: cacheKey,
     rootId,
     path,
@@ -398,10 +455,16 @@ export async function getCachedFile(params: Omit<FetchFileParams, "timeoutMs">):
 
 export function invalidateFileCache(rootId: string, path: string): void {
   const prefix = buildCacheKeyPrefix(rootId, path);
+  const diffPrefix = buildGitDiffCacheKeyPrefix(rootId, path);
   for (const key of memoryCache.keys()) {
     if (key.startsWith(prefix)) {
       memoryCache.delete(key);
       removeCachedRecordFromLocalStorage(key);
+    }
+  }
+  for (const key of gitDiffMemoryCache.keys()) {
+    if (key.startsWith(diffPrefix)) {
+      gitDiffMemoryCache.delete(key);
     }
   }
   void deleteCachedRecords((record) => record.rootId === rootId && record.path === path);
@@ -409,13 +472,62 @@ export function invalidateFileCache(rootId: string, path: string): void {
 
 export function clearFileCacheForRoot(rootId: string): void {
   const prefix = `${rootId}::`;
+  const diffPrefix = `git-diff::${rootId}::`;
   for (const key of memoryCache.keys()) {
     if (key.startsWith(prefix)) {
       memoryCache.delete(key);
       removeCachedRecordFromLocalStorage(key);
     }
   }
+  for (const key of gitDiffMemoryCache.keys()) {
+    if (key.startsWith(diffPrefix)) {
+      gitDiffMemoryCache.delete(key);
+    }
+  }
   void deleteCachedRecords((record) => record.rootId === rootId);
+}
+
+export async function getCachedGitDiff(
+  rootId: string,
+  path: string,
+  signature?: string,
+): Promise<CachedGitDiffPayload | null> {
+  const cacheKey = buildGitDiffCacheKey(rootId, path, signature);
+  const inMemory = gitDiffMemoryCache.get(cacheKey);
+  if (inMemory) {
+    return inMemory;
+  }
+
+  const record = await loadCachedGitDiffRecord(cacheKey);
+  if (!record?.diff) {
+    return null;
+  }
+
+  gitDiffMemoryCache.set(cacheKey, record.diff);
+  void saveCachedGitDiffRecord({
+    ...record,
+    touchedAt: Date.now(),
+  });
+  return record.diff;
+}
+
+export async function setCachedGitDiff(
+  rootId: string,
+  path: string,
+  diff: CachedGitDiffPayload,
+  signature?: string,
+): Promise<void> {
+  const cacheKey = buildGitDiffCacheKey(rootId, path, signature);
+  gitDiffMemoryCache.set(cacheKey, diff);
+  await saveCachedGitDiffRecord({
+    type: "git-diff",
+    key: cacheKey,
+    rootId,
+    path,
+    touchedAt: Date.now(),
+    diff,
+  });
+  void pruneCache();
 }
 
 export async function fetchFile(params: FetchFileParams): Promise<FilePayload | null> {
