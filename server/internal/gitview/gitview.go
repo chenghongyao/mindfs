@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"mindfs/server/internal/fs"
 )
@@ -143,6 +144,22 @@ func (r repoContext) statusItems(ctx context.Context) ([]StatusItem, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Batch fetch numstat for all tracked files in one call
+	trackedItems := make([]porcelainItem, 0)
+	for _, item := range rawItems {
+		if item.Status != "??" {
+			trackedItems = append(trackedItems, item)
+		}
+	}
+	numstatCache := make(map[string][2]int) // repoPath -> [additions, deletions]
+	if len(trackedItems) > 0 {
+		numstatCache, err = r.batchNumstat(ctx, trackedItems)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	items := make([]StatusItem, 0, len(rawItems))
 	for _, item := range rawItems {
 		path := r.fromRepoPath(item.Path)
@@ -150,10 +167,23 @@ func (r repoContext) statusItems(ctx context.Context) ([]StatusItem, error) {
 			continue
 		}
 		oldPath := r.fromRepoPath(item.OldPath)
-		additions, deletions, err := r.lineStats(ctx, item)
-		if err != nil {
-			return nil, err
+
+		var additions, deletions int
+		if item.Status == "??" {
+			target := filepath.Join(r.rootPath, filepath.FromSlash(path))
+			lines, err := countFileLines(target)
+			if err != nil {
+				continue
+			}
+			additions = lines
+		} else {
+			repoPath := r.toRepoPath(path)
+			if stats, ok := numstatCache[repoPath]; ok {
+				additions = stats[0]
+				deletions = stats[1]
+			}
 		}
+
 		items = append(items, StatusItem{
 			Path:      path,
 			OldPath:   oldPath,
@@ -163,6 +193,63 @@ func (r repoContext) statusItems(ctx context.Context) ([]StatusItem, error) {
 		})
 	}
 	return items, nil
+}
+
+// batchNumstat fetches line stats for all items with one cached and one worktree git call.
+func (r repoContext) batchNumstat(ctx context.Context, items []porcelainItem) (map[string][2]int, error) {
+	result := make(map[string][2]int)
+	if len(items) == 0 {
+		return result, nil
+	}
+
+	cachedOutput, err := r.batchNumstatHelper(ctx, true, items)
+	if err != nil {
+		return nil, err
+	}
+	parseBatchNumstat(cachedOutput, result)
+
+	workOutput, err := r.batchNumstatHelper(ctx, false, items)
+	if err != nil {
+		return nil, err
+	}
+	parseBatchNumstat(workOutput, result)
+
+	return result, nil
+}
+
+func (r repoContext) batchNumstatHelper(ctx context.Context, cached bool, items []porcelainItem) (string, error) {
+	args := []string{"diff", "--numstat"}
+	if cached {
+		args = append(args, "--cached")
+	}
+	args = append(args, "--")
+	for _, item := range items {
+		repoPath := r.toRepoPath(r.fromRepoPath(item.Path))
+		args = append(args, repoPath)
+	}
+	return runGit(ctx, r.repoRoot, args...)
+}
+
+func parseBatchNumstat(output string, result map[string][2]int) {
+	scanner := bufio.NewScanner(strings.NewReader(output))
+	for scanner.Scan() {
+		fields := strings.Split(scanner.Text(), "\t")
+		if len(fields) < 3 {
+			continue
+		}
+		var add, del int
+		if fields[0] != "-" {
+			fmt.Sscanf(fields[0], "%d", &add)
+		}
+		if fields[1] != "-" {
+			fmt.Sscanf(fields[1], "%d", &del)
+		}
+		path := fields[2]
+		stats := result[path]
+		stats[0] += add
+		stats[1] += del
+		result[path] = stats
+	}
 }
 
 func (r repoContext) diffContent(ctx context.Context, item StatusItem) (string, error) {
@@ -187,27 +274,6 @@ func (r repoContext) diffContent(ctx context.Context, item StatusItem) (string, 
 		parts = append(parts, strings.TrimRight(workingTree, "\n"))
 	}
 	return strings.Join(parts, "\n\n"), nil
-}
-
-func (r repoContext) lineStats(ctx context.Context, item porcelainItem) (int, int, error) {
-	if item.Status == "??" {
-		target := filepath.Join(r.rootPath, filepath.FromSlash(r.fromRepoPath(item.Path)))
-		lines, err := countFileLines(target)
-		if err != nil {
-			return 0, 0, nil
-		}
-		return lines, 0, nil
-	}
-	repoPath := r.toRepoPath(r.fromRepoPath(item.Path))
-	cachedAdd, cachedDel, err := gitNumstat(ctx, r.repoRoot, true, repoPath)
-	if err != nil {
-		return 0, 0, err
-	}
-	workAdd, workDel, err := gitNumstat(ctx, r.repoRoot, false, repoPath)
-	if err != nil {
-		return 0, 0, err
-	}
-	return cachedAdd + workAdd, cachedDel + workDel, nil
 }
 
 func (r repoContext) toRepoPath(rootRelativePath string) string {
@@ -289,43 +355,6 @@ func normalizeStatus(x, y byte) string {
 	}
 }
 
-func gitNumstat(ctx context.Context, repoRoot string, cached bool, repoPath string) (int, int, error) {
-	args := []string{"diff", "--numstat"}
-	if cached {
-		args = append(args, "--cached")
-	}
-	args = append(args, "--", repoPath)
-	output, err := runGit(ctx, repoRoot, args...)
-	if err != nil {
-		return 0, 0, err
-	}
-	additions, deletions := parseNumstat(output)
-	return additions, deletions, nil
-}
-
-func parseNumstat(output string) (int, int) {
-	scanner := bufio.NewScanner(strings.NewReader(output))
-	var additions int
-	var deletions int
-	for scanner.Scan() {
-		fields := strings.Split(scanner.Text(), "\t")
-		if len(fields) < 3 {
-			continue
-		}
-		if fields[0] != "-" {
-			var value int
-			fmt.Sscanf(fields[0], "%d", &value)
-			additions += value
-		}
-		if fields[1] != "-" {
-			var value int
-			fmt.Sscanf(fields[1], "%d", &value)
-			deletions += value
-		}
-	}
-	return additions, deletions
-}
-
 func diffAgainstEmptyFile(ctx context.Context, repoRoot, targetPath string) (string, error) {
 	tmpFile, err := os.CreateTemp("", "mindfs-git-empty-*")
 	if err != nil {
@@ -362,6 +391,12 @@ func countFileLines(path string) (int, error) {
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	// Add timeout if not already set (30 seconds for Windows compatibility)
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
