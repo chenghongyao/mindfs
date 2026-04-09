@@ -74,6 +74,7 @@ const PLUGIN_QUERY_STORAGE_PREFIX = "vp-progress:";
 const TREE_SORT_STORAGE_KEY = "mindfs-tree-sort-mode";
 const DIRECTORY_SORT_OVERRIDES_STORAGE_KEY = "mindfs-directory-sort-overrides";
 const FILE_SCROLL_STORAGE_KEY = "mindfs-file-scroll-positions";
+const LAST_ROOT_STORAGE_KEY = "mindfs-last-root-id";
 const READ_FILE_TOKEN_PATTERN = /\[read file:\s*[^\]]+\]/i;
 
 function normalizeUpdateState(input: UpdateState | null | undefined): UpdateState {
@@ -475,6 +476,13 @@ function buildDirectorySelectionKey(root: string, path: string, isRoot: boolean)
   return isRoot ? root : `${root}:${path}`;
 }
 
+function loadLastRootId(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return window.localStorage.getItem(LAST_ROOT_STORAGE_KEY) || "";
+}
+
 function hasExplicitFileContext(message: string): boolean {
   return READ_FILE_TOKEN_PATTERN.test(message);
 }
@@ -701,6 +709,14 @@ export function App() {
   }, [ensureCompletionAudioContext]);
 
   useEffect(() => { currentRootIdRef.current = currentRootId; }, [currentRootId]);
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    if (currentRootId) {
+      window.localStorage.setItem(LAST_ROOT_STORAGE_KEY, currentRootId);
+    }
+  }, [currentRootId]);
   useEffect(() => { expandedRef.current = expanded; }, [expanded]);
   useEffect(() => { selectedDirRef.current = selectedDir; }, [selectedDir]);
   useEffect(() => { entriesByPathRef.current = entriesByPath; }, [entriesByPath]);
@@ -1816,7 +1832,8 @@ export function App() {
       return;
     }
 
-    const nextRoot = nextRootIds[0];
+    const lastRoot = loadLastRootId();
+    const nextRoot = lastRoot && nextRootIds.includes(lastRoot) ? lastRoot : nextRootIds[0];
     await actionHandlersRef.current.open_dir({ path: nextRoot, root: nextRoot, preservePluginQuery: true, isRoot: true });
   }, [handleRelayNavigationFailure, replaceURLState]);
 
@@ -2634,7 +2651,10 @@ export function App() {
       managedRootIdsRef.current = new Set(ids); setManagedRootIds(ids);
       setRootEntries(mapManagedRootsToEntries(nextDirs));
       const urlState = readURLState();
-      const preferredRoot = urlState.root && ids.includes(urlState.root) ? urlState.root : ids[0];
+      const lastRoot = loadLastRootId();
+      const preferredRoot = urlState.root && ids.includes(urlState.root)
+        ? urlState.root
+        : (lastRoot && ids.includes(lastRoot) ? lastRoot : ids[0]);
       setCurrentRootId(preferredRoot);
       setPluginQuery(urlState.pluginQuery);
       if (urlState.session) {
