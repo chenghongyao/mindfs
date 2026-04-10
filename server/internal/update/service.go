@@ -78,7 +78,7 @@ func NewService(repo, currentVersion, executable string, args []string, interval
 		args:          append([]string(nil), args...),
 		checkInterval: interval,
 		client: &http.Client{
-			Timeout: 20 * time.Second,
+			Timeout: 10 * time.Minute,
 		},
 	}
 	st := Status{
