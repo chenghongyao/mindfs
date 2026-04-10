@@ -1775,7 +1775,9 @@ export function App() {
           if (isMobile) setIsLeftOpen(false);
         } catch {}
       };
-      if (isToggle && expandedRef.current.includes(expandedKey)) {
+      const isExpanded = expandedRef.current.includes(expandedKey);
+      const isCurrentExpandedRoot = isActuallyRoot && isExpanded && currentRootIdRef.current === root;
+      if (isToggle && (( !isActuallyRoot && isExpanded) || isCurrentExpandedRoot)) {
         setExpanded((prev) => prev.filter(k => k !== expandedKey));
         if (!isActuallyRoot) {
           const parentDir = dirnameOfPath(path);
