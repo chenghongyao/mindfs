@@ -68,6 +68,7 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/dirs", h.handleAddDir)
 	r.Delete("/api/dirs", h.handleRemoveDir)
 	r.Get("/api/relay/status", h.handleRelayStatus)
+	r.Get("/api/relay/tips", h.handleRelayTips)
 	r.Get("/api/app/update", h.handleAppUpdateGet)
 	r.Post("/api/app/update", h.handleAppUpdatePost)
 
@@ -654,6 +655,14 @@ func (h *HTTPHandler) handleRelayStatus(w http.ResponseWriter, _ *http.Request) 
 		return
 	}
 	respondJSON(w, http.StatusOK, manager.Status())
+}
+
+func (h *HTTPHandler) handleRelayTips(w http.ResponseWriter, _ *http.Request) {
+	if h.AppContext == nil || h.AppContext.GetRelayTipsService() == nil {
+		respondJSON(w, http.StatusOK, nil)
+		return
+	}
+	respondJSON(w, http.StatusOK, h.AppContext.GetRelayTipsService().Get())
 }
 
 func managedDirResponse(dir fs.RootInfo) map[string]any {

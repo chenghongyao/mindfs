@@ -20,11 +20,12 @@ type RootContext struct {
 }
 
 type AppContext struct {
-	Dirs   *fs.Registry
-	Agents *agent.Pool
-	Prober *agent.Prober
-	Relay  *relay.Manager
-	Update *update.Service
+	Dirs      *fs.Registry
+	Agents    *agent.Pool
+	Prober    *agent.Prober
+	Relay     *relay.Manager
+	RelayTips *relay.TipsService
+	Update    *update.Service
 
 	mu                       sync.RWMutex
 	roots                    map[string]*RootContext // root id -> root context
@@ -158,6 +159,10 @@ func (s *AppContext) GetDirRegistry() *fs.Registry {
 
 func (s *AppContext) GetRelayManager() *relay.Manager {
 	return s.Relay
+}
+
+func (s *AppContext) GetRelayTipsService() *relay.TipsService {
+	return s.RelayTips
 }
 
 func (s *AppContext) GetUpdateService() *update.Service {

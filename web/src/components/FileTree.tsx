@@ -12,6 +12,19 @@ type BeforeInstallPromptEvent = Event & {
 };
 
 const PWA_INSTALL_STATE_KEY = "mindfs-pwa-installed";
+const RELAYER_AD_DISMISS_STORAGE_KEY = "mindfs-relayer-ad-dismissed";
+
+type RelayTip = {
+  id: string;
+  badge?: string;
+  eyebrow?: string;
+  title: string;
+  description?: string;
+  cta_label?: string;
+  href?: string;
+  target?: "_blank" | "_self";
+  dismissible?: boolean;
+};
 
 type FileMeta = {
   source_session?: string;
@@ -143,6 +156,17 @@ export function FileTree({
   const [deferredInstallPrompt, setDeferredInstallPrompt] = React.useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = React.useState(false);
   const [isInstallCapable, setIsInstallCapable] = React.useState(false);
+  const [relayTip, setRelayTip] = React.useState<RelayTip | null>(null);
+  const [dismissedRelayTipId, setDismissedRelayTipId] = React.useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+    try {
+      return window.localStorage.getItem(RELAYER_AD_DISMISS_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const updateNotesRef = React.useRef<HTMLDivElement | null>(null);
   const createInputRef = React.useRef<HTMLInputElement | null>(null);
@@ -301,13 +325,40 @@ export function FileTree({
 
   const shouldShowInstallButton = !isKnownInstalled && !(isAndroidChrome && !deferredInstallPrompt);
   const shouldShowInstallHelp = (!!installHelp) && (isKnownInstalled || isIOS || isMacSafari || isDesktopChromium || deferredInstallPrompt !== null || (isAndroidChrome && !deferredInstallPrompt));
+  const shouldShowRelayTip = Boolean(relayTip?.id && relayTip?.title && dismissedRelayTipId !== relayTip.id);
   const hasFooterContent =
     !!updateActionLabel ||
     !!updateActionHelp ||
     !!relayActionLabel ||
     !!relayActionHelp ||
+    shouldShowRelayTip ||
     shouldShowInstallButton ||
     shouldShowInstallHelp;
+
+  const dismissRelayTip = React.useCallback(() => {
+    if (!relayTip?.id) {
+      return;
+    }
+    setDismissedRelayTipId(relayTip.id);
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(RELAYER_AD_DISMISS_STORAGE_KEY, relayTip.id);
+    } catch {
+    }
+  }, [relayTip]);
+
+  const openRelayTip = React.useCallback(() => {
+    if (typeof window === "undefined" || !relayTip?.href) {
+      return;
+    }
+    if (relayTip.target === "_self") {
+      window.location.href = relayTip.href;
+      return;
+    }
+    window.open(relayTip.href, "_blank", "noopener,noreferrer");
+  }, [relayTip]);
 
   const handleInstall = React.useCallback(async () => {
     if (isKnownInstalled) {
@@ -359,6 +410,34 @@ export function FileTree({
     }
     previousCreatingRootNameRef.current = creatingRootName;
   }, [creatingRootName]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    const controller = new AbortController();
+
+    const loadRelayTip = async () => {
+      try {
+        const response = await fetch("/api/relay/tips", { signal: controller.signal });
+        if (!response.ok) {
+          throw new Error(`tips request failed: ${response.status}`);
+        }
+        const payload = (await response.json()) as RelayTip | null;
+        if (!cancelled) {
+          setRelayTip(payload && payload.id && payload.title ? payload : null);
+        }
+      } catch {
+        if (!cancelled) {
+          setRelayTip(null);
+        }
+      }
+    };
+
+    loadRelayTip();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!isUpdateNotesOpen || typeof document === "undefined") {
@@ -786,6 +865,107 @@ export function FileTree({
         {updateActionHelp && !updateActionLabel ? (
           <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.5, textAlign: "center" }}>
             {updateActionHelp}
+          </div>
+        ) : null}
+        {shouldShowRelayTip && relayTip ? (
+          <div
+            style={{
+              position: "relative",
+              border: "1px solid rgba(37, 99, 235, 0.16)",
+              background: "linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(37, 99, 235, 0.04))",
+              borderRadius: "8px",
+              padding: "10px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px",
+              overflow: "hidden",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px" }}>
+              <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: "4px", flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                  {relayTip.badge ? (
+                    <span
+                      style={{
+                        padding: "2px 6px",
+                        borderRadius: "999px",
+                        background: "rgba(37, 99, 235, 0.1)",
+                        color: "var(--accent-color)",
+                        fontSize: "10px",
+                        fontWeight: 700,
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      {relayTip.badge}
+                    </span>
+                  ) : null}
+                  {relayTip.eyebrow ? (
+                    <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                      {relayTip.eyebrow}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--text-primary)", lineHeight: 1.35 }}>
+                  {relayTip.title}
+                </div>
+                {relayTip.description ? (
+                  <div style={{ fontSize: "11px", color: "var(--text-secondary)", lineHeight: 1.45 }}>
+                    {relayTip.description}
+                  </div>
+                ) : null}
+              </div>
+              {relayTip.dismissible !== false ? (
+                <button
+                  type="button"
+                  aria-label="关闭广告"
+                  onClick={dismissRelayTip}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--text-secondary)",
+                    width: "20px",
+                    height: "20px",
+                    borderRadius: "6px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    padding: 0,
+                  }}
+                >
+                  ×
+                </button>
+              ) : null}
+            </div>
+            {relayTip.href && relayTip.cta_label ? (
+              <button
+                type="button"
+                onClick={openRelayTip}
+                style={{
+                  alignSelf: "flex-start",
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--accent-color)",
+                  borderRadius: "6px",
+                  padding: "0",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "4px",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  fontWeight: 600,
+                  lineHeight: 1,
+                }}
+              >
+                <span>{relayTip.cta_label}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12h14" />
+                  <path d="m13 5 7 7-7 7" />
+                </svg>
+              </button>
+            ) : null}
           </div>
         ) : null}
         {shouldShowInstallButton ? (

@@ -537,7 +537,7 @@ export function App() {
   const pluginsLoadingByRootRef = useRef<Record<string, Promise<void>>>({});
   const didInitRef = useRef(false);
   const handleSelectSessionRef = useRef<((session: any) => Promise<void>) | null>(null);
-  
+
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const sessionsRef = useRef<SessionItem[]>([]);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
@@ -3087,10 +3087,7 @@ export function App() {
     if (relayStatus?.no_relayer) {
       return null;
     }
-    if (relayStatus?.relay_bound) {
-      return "打开 Relayer";
-    }
-    return "绑定 Relayer";
+    return "从公网访问";
   }, [relayStatus]);
 
   const relayActionDisabled = !currentRootId || (!relayStatus?.relay_bound && (!relayStatus?.pending_code || !relayStatus?.relay_base_url));

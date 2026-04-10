@@ -75,9 +75,11 @@ func Start(ctx context.Context, addr string, opts StartOptions) error {
 		return err
 	}
 	services.Relay = relayMgr
+	services.RelayTips = relay.NewTipsService(relayMgr)
 	if err := relayMgr.Start(ctx); err != nil {
 		return err
 	}
+	services.RelayTips.Start(ctx)
 
 	go func() {
 		<-ctx.Done()
