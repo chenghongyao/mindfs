@@ -58,6 +58,7 @@ func (r *Runtime) OpenSession(_ context.Context, opts OpenOptions) (types.Sessio
 	return &session{
 		client:        client,
 		thread:        thread,
+		threadOpts:    threadOptions,
 		threadID:      threadID,
 		sessionKey:    opts.SessionKey,
 		agentDebugLog: logs.NewAgentLogger(opts.RootPath, opts.SessionKey, opts.AgentName),
@@ -118,6 +119,7 @@ func newClient(opts OpenOptions) *codexsdk.Codex {
 type session struct {
 	client     *codexsdk.Codex
 	thread     *codexsdk.Thread
+	threadOpts codexsdk.ThreadOptions
 	threadID   string
 	sessionKey string
 
@@ -201,6 +203,29 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 	}
 
 	s.updateThreadIDFromThread()
+	return nil
+}
+
+func (s *session) SetModel(_ context.Context, model string) error {
+	if s == nil || s.client == nil {
+		return errors.New("codex session not initialized")
+	}
+	threadID := strings.TrimSpace(s.SessionID())
+	if threadID == "" {
+		s.updateThreadIDFromThread()
+		threadID = strings.TrimSpace(s.SessionID())
+	}
+	if threadID == "" {
+		return errors.New("codex thread id unavailable")
+	}
+	opts := s.threadOpts
+	opts.Model = strings.TrimSpace(model)
+	thread := s.client.ResumeThread(threadID, opts)
+	s.mu.Lock()
+	s.thread = thread
+	s.threadOpts = opts
+	s.threadID = threadID
+	s.mu.Unlock()
 	return nil
 }
 

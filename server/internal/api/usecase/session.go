@@ -723,11 +723,18 @@ func (s *Service) ensureAgentSession(
 	if current != nil {
 		currentModel = strings.TrimSpace(current.Model)
 	}
-	if current != nil && currentModel != nextModel {
-		log.Printf("[session/model] switch.detected session=%s agent=%s from=%q to=%q action=close_runtime_session", current.Key, agentName, currentModel, nextModel)
-		pool.Close(poolSessionKey)
-	}
 	if existing, ok := pool.Get(poolSessionKey); ok {
+		if current != nil && currentModel != nextModel {
+			log.Printf("[session/model] switch.detected session=%s agent=%s from=%q to=%q action=set_runtime_model", current.Key, agentName, currentModel, nextModel)
+			if err := existing.SetModel(ctx, nextModel); err != nil {
+				if prober := s.Registry.GetProber(); prober != nil {
+					prober.ReportRuntimeFailure(agentName, err)
+				}
+				log.Printf("[session/model] switch.error session=%s agent=%s model=%q pool_session=%s err=%v", current.Key, agentName, nextModel, poolSessionKey, err)
+				return nil, err
+			}
+			log.Printf("[session/model] switch.done session=%s agent=%s model=%q pool_session=%s", current.Key, agentName, nextModel, poolSessionKey)
+		}
 		return existing, nil
 	}
 

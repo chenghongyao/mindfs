@@ -163,6 +163,20 @@ func (s *session) SendMessage(ctx context.Context, content string) error {
 	}
 }
 
+func (s *session) SetModel(ctx context.Context, model string) error {
+	if s == nil || s.stream == nil {
+		return errors.New("claude session not initialized")
+	}
+	trimmed := strings.TrimSpace(model)
+	if err := s.stream.SetModel(ctx, trimmed); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.model = trimmed
+	s.mu.Unlock()
+	return nil
+}
+
 func (s *session) ListModels(ctx context.Context) (types.ModelList, error) {
 	_ = ctx
 	if s.client == nil {
