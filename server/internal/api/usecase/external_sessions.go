@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"path/filepath"
 	"strings"
 	"time"
@@ -127,13 +126,6 @@ func (s *Service) ImportExternalSession(ctx context.Context, in ImportExternalSe
 	manager, err := s.Registry.GetSessionManager(in.RootID)
 	if err != nil {
 		return ImportExternalSessionOutput{}, err
-	}
-	bound, err := manager.HasAgentBinding(ctx, in.Agent, in.AgentSessionID)
-	if err != nil {
-		return ImportExternalSessionOutput{}, err
-	}
-	if bound {
-		return ImportExternalSessionOutput{}, errors.New("external session already bound")
 	}
 	importer, err := s.resolveExternalSessionImporter(in.Agent)
 	if err != nil {
