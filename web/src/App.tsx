@@ -4644,14 +4644,11 @@ export function App() {
           >
             {availableAgents.map((item) => {
               const selected = item.name === externalImportAgent;
-              const disabled = !item.available;
               return (
                 <button
                   key={item.name}
                   type="button"
-                  disabled={disabled}
                   onClick={() => {
-                    if (disabled) return;
                     setImportMenuOpen(false);
                     setExternalImportAgent(item.name);
                     setExternalSelectedKey("");
@@ -4666,16 +4663,14 @@ export function App() {
                     background: selected
                       ? "rgba(59, 130, 246, 0.1)"
                       : "transparent",
-                    color: disabled
-                      ? "rgba(100, 116, 139, 0.55)"
-                      : selected
-                        ? "var(--accent-color)"
-                        : "var(--text-primary)",
+                    color: selected
+                      ? "var(--accent-color)"
+                      : "var(--text-primary)",
                     borderRadius: "8px",
                     padding: "8px 10px",
-                    cursor: disabled ? "default" : "pointer",
+                    cursor: "pointer",
                     textAlign: "left",
-                    opacity: disabled ? 0.7 : 1,
+                    opacity: 1,
                   }}
                 >
                   <AgentIcon
@@ -4696,6 +4691,27 @@ export function App() {
                   >
                     {item.name}
                   </span>
+                  {!item.available ? (
+                    <span
+                      aria-label="当前未就绪"
+                      title="当前未就绪"
+                      style={{
+                        minWidth: "11px",
+                        height: "11px",
+                        padding: "0 2px",
+                        borderRadius: "50%",
+                        background: "#d97706",
+                        color: "#fff",
+                        fontSize: "9px",
+                        lineHeight: "11px",
+                        textAlign: "center",
+                        flexShrink: 0,
+                        fontWeight: 700,
+                      }}
+                    >
+                      !
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
