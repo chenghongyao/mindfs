@@ -329,11 +329,11 @@ func TestSessionNameRunnerSkipsWithoutAgentOrPool(t *testing.T) {
 
 func TestAppendResponseChunk(t *testing.T) {
 	testCases := []struct {
-		name       string
-		current    string
-		lastType   string
-		chunk      string
-		want       string
+		name     string
+		current  string
+		lastType string
+		chunk    string
+		want     string
 	}{
 		{
 			name:     "plain message append",
@@ -457,6 +457,10 @@ func (uploadTestRegistry) ListRoots() []rootfs.RootInfo {
 
 func (uploadTestRegistry) GetAgentPool() *agent.Pool {
 	return nil
+}
+
+func (uploadTestRegistry) GetExternalSessionImporter(string) (agenttypes.ExternalSessionImporter, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (uploadTestRegistry) GetProber() *agent.Prober {

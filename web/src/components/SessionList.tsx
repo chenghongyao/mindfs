@@ -17,6 +17,7 @@ export type SessionItem = {
 type SessionListProps = {
   sessions: SessionItem[];
   selectedKey?: string;
+  headerAction?: React.ReactNode;
   onSelect?: (session: SessionItem) => void;
   onRestore?: (session: SessionItem) => void;
   onDelete?: (session: SessionItem) => void;
@@ -33,6 +34,7 @@ const typeIcons: Record<SessionType, string> = {
 export function SessionList({
   sessions,
   selectedKey = "",
+  headerAction,
   onSelect,
   onDelete,
   onLoadOlder,
@@ -40,13 +42,22 @@ export function SessionList({
   hasMore = false,
 }: SessionListProps) {
   return (
-    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "transparent" }}>
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: "flex",
+        flexDirection: "column",
+        background: "transparent",
+      }}
+    >
       {/* 统一的 Header 边栏 */}
       <div
         style={{
           height: "36px",
           display: "flex",
           alignItems: "center",
+          justifyContent: "space-between",
           padding: "0 16px",
           borderBottom: "1px solid var(--border-color)",
           flexShrink: 0,
@@ -65,11 +76,22 @@ export function SessionList({
         >
           SESSIONS
         </h3>
+        {headerAction ? (
+          <div style={{ display: "inline-flex", alignItems: "center" }}>
+            {headerAction}
+          </div>
+        ) : null}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflow: "auto", padding: "8px" }}>
         {!sessions.length ? (
-          <div style={{ fontSize: "12px", color: "var(--text-secondary)", padding: "12px 8px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-secondary)",
+              padding: "12px 8px",
+            }}
+          >
             暂无会话记录
           </div>
         ) : (
@@ -109,7 +131,17 @@ export function SessionList({
   );
 }
 
-function SessionCard({ session, selected, onSelect, onDelete }: { session: SessionItem; selected: boolean; onSelect?: (session: SessionItem) => void; onDelete?: (session: SessionItem) => void }) {
+function SessionCard({
+  session,
+  selected,
+  onSelect,
+  onDelete,
+}: {
+  session: SessionItem;
+  selected: boolean;
+  onSelect?: (session: SessionItem) => void;
+  onDelete?: (session: SessionItem) => void;
+}) {
   const isClosed = !!session.closed_at;
   const displayName = session.name || `Session ${session.key.slice(0, 8)}`;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -155,10 +187,24 @@ function SessionCard({ session, selected, onSelect, onDelete }: { session: Sessi
           gap: "8px",
           transition: "all 0.15s ease",
         }}
-        onMouseEnter={(e) => { if(!selected) e.currentTarget.style.background = "rgba(0,0,0,0.03)"; }}
-        onMouseLeave={(e) => { if(!selected) e.currentTarget.style.background = "transparent"; }}
+        onMouseEnter={(e) => {
+          if (!selected) e.currentTarget.style.background = "rgba(0,0,0,0.03)";
+        }}
+        onMouseLeave={(e) => {
+          if (!selected) e.currentTarget.style.background = "transparent";
+        }}
       >
-        <span style={{ position: "relative", width: "18px", height: "18px", flexShrink: 0, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+        <span
+          style={{
+            position: "relative",
+            width: "18px",
+            height: "18px",
+            flexShrink: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <span style={{ fontSize: "14px", lineHeight: 1 }}>
             {typeIcons[session.type]}
           </span>
@@ -178,30 +224,41 @@ function SessionCard({ session, selected, onSelect, onDelete }: { session: Sessi
               overflow: "hidden",
             }}
           >
-            <AgentIcon agentName={session.agent || ""} style={{ width: "10px", height: "10px", display: "block" }} />
+            <AgentIcon
+              agentName={session.agent || ""}
+              style={{ width: "10px", height: "10px", display: "block" }}
+            />
           </span>
         </span>
 
-        <div style={{
-          minWidth: 0,
-          flex: 1,
-          fontSize: "13px",
-          fontWeight: selected ? 600 : 500,
-          color: selected ? "var(--accent-color)" : "var(--text-primary)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}>
+        <div
+          style={{
+            minWidth: 0,
+            flex: 1,
+            fontSize: "13px",
+            fontWeight: selected ? 600 : 500,
+            color: selected ? "var(--accent-color)" : "var(--text-primary)",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
           {displayName}
         </div>
 
-        <span style={{
-          flexShrink: 0,
-          fontSize: "10px",
-          color: "var(--text-secondary)",
-          opacity: 0.8,
-        }}>
-          {formatTime(isClosed && session.closed_at ? session.closed_at : session.updated_at)}
+        <span
+          style={{
+            flexShrink: 0,
+            fontSize: "10px",
+            color: "var(--text-secondary)",
+            opacity: 0.8,
+          }}
+        >
+          {formatTime(
+            isClosed && session.closed_at
+              ? session.closed_at
+              : session.updated_at,
+          )}
         </span>
       </button>
 
@@ -227,7 +284,13 @@ function SessionCard({ session, selected, onSelect, onDelete }: { session: Sessi
             outline: "none",
           }}
         >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
             <circle cx="12" cy="5" r="1.8" />
             <circle cx="12" cy="12" r="1.8" />
             <circle cx="12" cy="19" r="1.8" />
@@ -271,7 +334,17 @@ function SessionCard({ session, selected, onSelect, onDelete }: { session: Sessi
                 fontWeight: 500,
               }}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
                 <polyline points="3 6 5 6 21 6" />
                 <path d="M19 6l-1 14H6L5 6" />
                 <path d="M10 11v6" />

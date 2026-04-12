@@ -78,6 +78,11 @@ WHERE session_key = ? AND agent = ?`
 SELECT session_key, agent, agent_session_id, agent_ctx_seq
 FROM session_agent_bindings
 WHERE session_key = ?`
+	selectBindingByAgentSessionSQL = `
+SELECT 1
+FROM session_agent_bindings
+WHERE agent = ? AND agent_session_id = ?
+LIMIT 1`
 )
 
 type Manager struct {
@@ -353,6 +358,34 @@ func (m *Manager) GetAgentBinding(_ context.Context, sessionKey, agent string) (
 		return nil, err
 	}
 	return &binding, nil
+}
+
+func (m *Manager) HasAgentBinding(_ context.Context, agent, agentSessionID string) (bool, error) {
+	if strings.TrimSpace(agent) == "" {
+		return false, errors.New("agent required")
+	}
+	if strings.TrimSpace(agentSessionID) == "" {
+		return false, errors.New("agent session id required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	db, err := m.ensureSessionMetaDBUnsafe()
+	if err != nil {
+		return false, err
+	}
+	var found int
+	err = db.QueryRow(
+		selectBindingByAgentSessionSQL,
+		strings.TrimSpace(agent),
+		strings.TrimSpace(agentSessionID),
+	).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return found == 1, nil
 }
 
 func (m *Manager) listAgentBindingsUnsafe(sessionKey string) ([]AgentBinding, error) {

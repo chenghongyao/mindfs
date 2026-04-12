@@ -1,18 +1,48 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { getViewModeSystemPrompt } from "./renderer/viewCatalog";
 import { Renderer } from "./renderer/Renderer";
-import { deleteCachedSession, getCachedSession, sessionService, setCachedSessionRelatedFiles, syncSession, type RelatedFile, type Session } from "./services/session";
+import {
+  deleteCachedSession,
+  getCachedSession,
+  sessionService,
+  setCachedSessionRelatedFiles,
+  syncSession,
+  type RelatedFile,
+  type Session,
+} from "./services/session";
 import { buildClientContext } from "./services/context";
 import { reportError } from "./services/error";
-import { fetchFile, getCachedFile, invalidateFileCache, type FilePayload } from "./services/file";
-import { buildGitDiffCacheSignature, fetchGitDiff, fetchGitStatus, type GitDiffPayload, type GitStatusItem, type GitStatusPayload } from "./services/git";
+import {
+  fetchFile,
+  getCachedFile,
+  invalidateFileCache,
+  type FilePayload,
+} from "./services/file";
+import {
+  buildGitDiffCacheSignature,
+  fetchGitDiff,
+  fetchGitStatus,
+  type GitDiffPayload,
+  type GitStatusItem,
+  type GitStatusPayload,
+} from "./services/git";
 import {
   DEFAULT_DIRECTORY_SORT_MODE,
   type DirectorySortMode,
   type FileEntry,
 } from "./services/directorySort";
 import { uploadFiles } from "./services/upload";
-import { PluginManager, loadAllPlugins, type PluginInput } from "./plugins/manager";
+import {
+  PluginManager,
+  loadAllPlugins,
+  type PluginInput,
+} from "./plugins/manager";
 import { appPath, appURL, isRelayNodePage } from "./services/base";
 import { triggerUpdate, type UpdateState } from "./services/update";
 
@@ -25,14 +55,56 @@ import { GitStatusPanel } from "./components/GitStatusPanel";
 import { SessionViewer } from "./components/SessionViewer";
 import { DefaultListView } from "./components/DefaultListView";
 import { SessionList } from "./components/SessionList";
+import { ExternalSessionList } from "./components/ExternalSessionList";
+import { AgentIcon } from "./components/AgentIcon";
 import { ActionBar } from "./components/ActionBar";
 import { BottomSheet } from "./components/BottomSheet";
+import { fetchAgents, type AgentStatus } from "./services/agents";
 
 // 类型定义
 type SessionMode = "chat" | "plugin";
-export type SessionItem = { key?: string; session_key?: string; root_id?: string; name?: string; type?: SessionMode; agent?: string; model?: string; scope?: string; purpose?: string; created_at?: string; updated_at?: string; closed_at?: string; related_files?: RelatedFile[]; exchanges?: Array<{ role?: string; content?: string; timestamp?: string; model?: string }>; pending?: boolean; };
-type Exchange = { role: string; agent?: string; model?: string; content?: string; timestamp?: string; toolCall?: any; pending_ack?: boolean; };
-type PendingSend = { rootId: string; mode: SessionMode; agent: string; model?: string; message: string; timestamp: string; requestId?: string; sessionKey?: string; tempKey?: string; };
+export type SessionItem = {
+  key?: string;
+  session_key?: string;
+  root_id?: string;
+  name?: string;
+  type?: SessionMode;
+  agent?: string;
+  model?: string;
+  scope?: string;
+  purpose?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string;
+  related_files?: RelatedFile[];
+  exchanges?: Array<{
+    role?: string;
+    content?: string;
+    timestamp?: string;
+    model?: string;
+  }>;
+  pending?: boolean;
+};
+type Exchange = {
+  role: string;
+  agent?: string;
+  model?: string;
+  content?: string;
+  timestamp?: string;
+  toolCall?: any;
+  pending_ack?: boolean;
+};
+type PendingSend = {
+  rootId: string;
+  mode: SessionMode;
+  agent: string;
+  model?: string;
+  message: string;
+  timestamp: string;
+  requestId?: string;
+  sessionKey?: string;
+  tempKey?: string;
+};
 type ViewerSelection = {
   filePath: string;
   text?: string;
@@ -51,7 +123,13 @@ type GitFileStat = {
   additions: number;
   deletions: number;
 };
-type URLState = { root: string; file: string; session: string; cursor: number; pluginQuery: Record<string, string> };
+type URLState = {
+  root: string;
+  file: string;
+  session: string;
+  cursor: number;
+  pluginQuery: Record<string, string>;
+};
 type ManagedRootPayload = {
   id: string;
   display_name?: string;
@@ -77,7 +155,9 @@ const FILE_SCROLL_STORAGE_KEY = "mindfs-file-scroll-positions";
 const LAST_ROOT_STORAGE_KEY = "mindfs-last-root-id";
 const READ_FILE_TOKEN_PATTERN = /\[read file:\s*[^\]]+\]/i;
 
-function normalizeUpdateState(input: UpdateState | null | undefined): UpdateState {
+function normalizeUpdateState(
+  input: UpdateState | null | undefined,
+): UpdateState {
   return {
     current_version: input?.current_version || "",
     latest_version: input?.latest_version || "",
@@ -131,13 +211,21 @@ function updateSummaryText(state: UpdateState): string {
 
 function shouldShowUpdateButton(state: UpdateState): boolean {
   const status = (state.status || "idle").toLowerCase();
-  if (status === "downloading" || status === "installing" || status === "restarting" || status === "failed") {
+  if (
+    status === "downloading" ||
+    status === "installing" ||
+    status === "restarting" ||
+    status === "failed"
+  ) {
     return true;
   }
   return state.auto_update_supported === true && state.has_update === true;
 }
 
-function buildFileScrollKey(rootId: string | null | undefined, path: string | null | undefined): string {
+function buildFileScrollKey(
+  rootId: string | null | undefined,
+  path: string | null | undefined,
+): string {
   if (!rootId || !path) {
     return "";
   }
@@ -174,9 +262,9 @@ function openPendingPopup(): Window | null {
   }
   try {
     popup.document.title = "Opening Relayer...";
-    popup.document.body.innerHTML = "<p style=\"font-family: system-ui, sans-serif; padding: 16px; color: #111827;\">Opening Relayer...</p>";
-  } catch {
-  }
+    popup.document.body.innerHTML =
+      '<p style="font-family: system-ui, sans-serif; padding: 16px; color: #111827;">Opening Relayer...</p>';
+  } catch {}
   return popup;
 }
 
@@ -187,8 +275,7 @@ function navigatePopup(popup: Window | null, url: string): void {
   }
   try {
     popup.opener = null;
-  } catch {
-  }
+  } catch {}
   try {
     popup.location.replace(url);
   } catch {
@@ -205,19 +292,31 @@ function isStandaloneDisplayMode(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  const navigatorWithStandalone = navigator as Navigator & { standalone?: boolean };
-  return window.matchMedia?.("(display-mode: standalone)")?.matches === true || navigatorWithStandalone.standalone === true;
+  const navigatorWithStandalone = navigator as Navigator & {
+    standalone?: boolean;
+  };
+  return (
+    window.matchMedia?.("(display-mode: standalone)")?.matches === true ||
+    navigatorWithStandalone.standalone === true
+  );
 }
 
 function isRelayPWAContext(): boolean {
   if (typeof window === "undefined") {
     return false;
   }
-  return isStandaloneDisplayMode() && (/^\/n\/[^/]+/.test(window.location.pathname) || window.location.pathname === "/nodes" || window.location.pathname === "/login");
+  return (
+    isStandaloneDisplayMode() &&
+    (/^\/n\/[^/]+/.test(window.location.pathname) ||
+      window.location.pathname === "/nodes" ||
+      window.location.pathname === "/login")
+  );
 }
 
 function extractHTTPStatusFromErrorMessage(message: string): number | null {
-  const match = /status=(\d{3})|(?:^|:\s)(\d{3})\s[A-Z]/.exec(String(message || ""));
+  const match = /status=(\d{3})|(?:^|:\s)(\d{3})\s[A-Z]/.exec(
+    String(message || ""),
+  );
   const raw = match?.[1] || match?.[2];
   if (!raw) {
     return null;
@@ -258,9 +357,11 @@ function persistFileScrollPositions(positions: Record<string, number>): void {
     return;
   }
   try {
-    window.localStorage.setItem(FILE_SCROLL_STORAGE_KEY, JSON.stringify(positions));
-  } catch {
-  }
+    window.localStorage.setItem(
+      FILE_SCROLL_STORAGE_KEY,
+      JSON.stringify(positions),
+    );
+  } catch {}
 }
 
 function normalizeMode(mode: SessionMode | undefined): SessionMode {
@@ -297,13 +398,17 @@ function normalizeCursor(value: unknown): number | null {
   return parsed;
 }
 
-function isDirectorySortMode(value: string | null | undefined): value is DirectorySortMode {
-  return value === "name-asc"
-    || value === "name-desc"
-    || value === "mtime-desc"
-    || value === "mtime-asc"
-    || value === "size-desc"
-    || value === "size-asc";
+function isDirectorySortMode(
+  value: string | null | undefined,
+): value is DirectorySortMode {
+  return (
+    value === "name-asc" ||
+    value === "name-desc" ||
+    value === "mtime-desc" ||
+    value === "mtime-asc" ||
+    value === "size-desc" ||
+    value === "size-asc"
+  );
 }
 
 function readURLState(): URLState {
@@ -335,33 +440,48 @@ function pluginQueryStorageKey(root: string, file: string): string {
   return `${PLUGIN_QUERY_STORAGE_PREFIX}${root}:${file}`;
 }
 
-function loadPersistedPluginQuery(root: string, file: string): Record<string, string> {
+function loadPersistedPluginQuery(
+  root: string,
+  file: string,
+): Record<string, string> {
   if (!root || !file) return {};
   try {
     const raw = window.localStorage.getItem(pluginQueryStorageKey(root, file));
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+      return {};
     const next: Record<string, string> = {};
-    Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
-      if (!key) return;
-      next[key] = String(value);
-    });
+    Object.entries(parsed as Record<string, unknown>).forEach(
+      ([key, value]) => {
+        if (!key) return;
+        next[key] = String(value);
+      },
+    );
     return next;
   } catch {
     return {};
   }
 }
 
-function persistPluginQuery(root: string, file: string, query: Record<string, string>): void {
+function persistPluginQuery(
+  root: string,
+  file: string,
+  query: Record<string, string>,
+): void {
   if (!root || !file) return;
   try {
-    window.localStorage.setItem(pluginQueryStorageKey(root, file), JSON.stringify(query || {}));
-  } catch {
-  }
+    window.localStorage.setItem(
+      pluginQueryStorageKey(root, file),
+      JSON.stringify(query || {}),
+    );
+  } catch {}
 }
 
-function toPluginInput(file: FilePayload, query: Record<string, string>): PluginInput {
+function toPluginInput(
+  file: FilePayload,
+  query: Record<string, string>,
+): PluginInput {
   return {
     name: file.name,
     path: file.path,
@@ -370,7 +490,8 @@ function toPluginInput(file: FilePayload, query: Record<string, string>): Plugin
     mime: file.mime || "",
     size: typeof file.size === "number" ? file.size : 0,
     truncated: !!file.truncated,
-    next_cursor: typeof file.next_cursor === "number" ? file.next_cursor : undefined,
+    next_cursor:
+      typeof file.next_cursor === "number" ? file.next_cursor : undefined,
     query,
   };
 }
@@ -382,7 +503,10 @@ function inferReadModeFromPlugin(plugin: any): "incremental" | "full" {
   return "incremental";
 }
 
-function buildMatchInputFromPath(path: string, query: Record<string, string>): PluginInput {
+function buildMatchInputFromPath(
+  path: string,
+  query: Record<string, string>,
+): PluginInput {
   const normalized = (path || "").replace(/\\/g, "/");
   const name = normalized.split("/").pop() || normalized;
   const dot = name.lastIndexOf(".");
@@ -400,7 +524,9 @@ function buildMatchInputFromPath(path: string, query: Record<string, string>): P
 }
 
 function normalizePath(value: string): string {
-  return String(value || "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return String(value || "")
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "");
 }
 
 function normalizePathForRoot(value: string, rootPath?: string): string {
@@ -415,7 +541,11 @@ function normalizePathForRoot(value: string, rootPath?: string): string {
   return normalized;
 }
 
-function parseFileLocation(path: string): { path: string; targetLine?: number; targetColumn?: number } {
+function parseFileLocation(path: string): {
+  path: string;
+  targetLine?: number;
+  targetColumn?: number;
+} {
   const raw = String(path || "");
   const [base, fragment = ""] = raw.split("#", 2);
   if (!fragment) {
@@ -429,8 +559,12 @@ function parseFileLocation(path: string): { path: string; targetLine?: number; t
   const targetColumn = match[2] ? Number.parseInt(match[2], 10) : undefined;
   return {
     path: base,
-    targetLine: Number.isFinite(targetLine) && targetLine > 0 ? targetLine : undefined,
-    targetColumn: targetColumn && Number.isFinite(targetColumn) && targetColumn > 0 ? targetColumn : undefined,
+    targetLine:
+      Number.isFinite(targetLine) && targetLine > 0 ? targetLine : undefined,
+    targetColumn:
+      targetColumn && Number.isFinite(targetColumn) && targetColumn > 0
+        ? targetColumn
+        : undefined,
   };
 }
 
@@ -472,7 +606,11 @@ function mapManagedRootsToEntries(dirs: ManagedRootPayload[]): FileEntry[] {
   }));
 }
 
-function buildDirectorySelectionKey(root: string, path: string, isRoot: boolean): string {
+function buildDirectorySelectionKey(
+  root: string,
+  path: string,
+  isRoot: boolean,
+): string {
   return isRoot ? root : `${root}:${path}`;
 }
 
@@ -525,7 +663,9 @@ export function App() {
   const drawerSessionByRootRef = useRef<Record<string, Session | null>>({});
   const drawerOpenByRootRef = useRef<Record<string, boolean>>({});
   const fileCursorRef = useRef<number>(0);
-  const fileScrollPositionsRef = useRef<Record<string, number>>(loadPersistedFileScrollPositions());
+  const fileScrollPositionsRef = useRef<Record<string, number>>(
+    loadPersistedFileScrollPositions(),
+  );
   const viewerSelectionRef = useRef<ViewerSelection | null>(null);
   const lastViewerSelectionRef = useRef<ViewerSelection | null>(null);
   const dismissedSelectionFileRef = useRef<string | null>(null);
@@ -536,22 +676,49 @@ export function App() {
   const pluginsLoadedByRootRef = useRef<Record<string, boolean>>({});
   const pluginsLoadingByRootRef = useRef<Record<string, Promise<void>>>({});
   const didInitRef = useRef(false);
-  const handleSelectSessionRef = useRef<((session: any) => Promise<void>) | null>(null);
+  const handleSelectSessionRef = useRef<
+    ((session: any) => Promise<void>) | null
+  >(null);
 
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const sessionsRef = useRef<SessionItem[]>([]);
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [loadingOlderSessions, setLoadingOlderSessions] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<SessionItem | null>(null);
-  const [activeBoundSessionKey, setActiveBoundSessionKey] = useState<string | null>(null);
+  const [sessionListMode, setSessionListMode] = useState<"local" | "import">(
+    "local",
+  );
+  const [externalSessions, setExternalSessions] = useState<SessionItem[]>([]);
+  const externalSessionsRef = useRef<SessionItem[]>([]);
+  const [hasMoreExternalSessions, setHasMoreExternalSessions] = useState(false);
+  const [loadingOlderExternalSessions, setLoadingOlderExternalSessions] =
+    useState(false);
+  const [loadingExternalSessions, setLoadingExternalSessions] = useState(false);
+  const [externalSelectedKey, setExternalSelectedKey] = useState("");
+  const [externalImportAgent, setExternalImportAgent] = useState("");
+  const [externalFilterBound, setExternalFilterBound] = useState(true);
+  const [importingExternalSessionKey, setImportingExternalSessionKey] =
+    useState("");
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
+  const importMenuRef = useRef<HTMLDivElement | null>(null);
+  const [availableAgents, setAvailableAgents] = useState<AgentStatus[]>([]);
+  const [selectedSession, setSelectedSession] = useState<SessionItem | null>(
+    null,
+  );
+  const [activeBoundSessionKey, setActiveBoundSessionKey] = useState<
+    string | null
+  >(null);
   const [currentSession, setCurrentSession] = useState<Session | null>(null);
   const [cacheVersion, setCacheVersion] = useState(0);
-  const [interactionMode, setInteractionMode] = useState<"main" | "drawer">("main");
+  const [interactionMode, setInteractionMode] = useState<"main" | "drawer">(
+    "main",
+  );
   const [agentsVersion, setAgentsVersion] = useState(0);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const { isMobile } = useResponsive();
   const [isLeftOpen, setIsLeftOpen] = useState(() => window.innerWidth >= 768);
-  const [isRightOpen, setIsRightOpen] = useState(() => window.innerWidth >= 768);
+  const [isRightOpen, setIsRightOpen] = useState(
+    () => window.innerWidth >= 768,
+  );
   const [currentRootId, setCurrentRootId] = useState<string | null>(null);
   const currentRootIdRef = useRef<string | null>(null);
   const [managedRootIds, setManagedRootIds] = useState<string[]>([]);
@@ -559,8 +726,12 @@ export function App() {
   const [rootEntries, setRootEntries] = useState<FileEntry[]>([]);
   const [creatingRootName, setCreatingRootName] = useState<string | null>(null);
   const [creatingRootBusy, setCreatingRootBusy] = useState(false);
-  const [relayStatus, setRelayStatus] = useState<RelayStatusPayload | null>(null);
-  const [entriesByPath, setEntriesByPath] = useState<Record<string, FileEntry[]>>({});
+  const [relayStatus, setRelayStatus] = useState<RelayStatusPayload | null>(
+    null,
+  );
+  const [entriesByPath, setEntriesByPath] = useState<
+    Record<string, FileEntry[]>
+  >({});
   const entriesByPathRef = useRef<Record<string, FileEntry[]>>({});
   const [expanded, setExpanded] = useState<string[]>([]);
   const [selectedDir, setSelectedDir] = useState<string | null>(null);
@@ -576,18 +747,24 @@ export function App() {
     const saved = window.localStorage.getItem(TREE_SORT_STORAGE_KEY);
     return isDirectorySortMode(saved) ? saved : DEFAULT_DIRECTORY_SORT_MODE;
   });
-  const [directorySortOverrides, setDirectorySortOverrides] = useState<Record<string, DirectorySortMode>>(() => {
+  const [directorySortOverrides, setDirectorySortOverrides] = useState<
+    Record<string, DirectorySortMode>
+  >(() => {
     if (typeof window === "undefined") {
       return {};
     }
     try {
-      const saved = window.localStorage.getItem(DIRECTORY_SORT_OVERRIDES_STORAGE_KEY);
+      const saved = window.localStorage.getItem(
+        DIRECTORY_SORT_OVERRIDES_STORAGE_KEY,
+      );
       if (!saved) {
         return {};
       }
       const parsed = JSON.parse(saved) as Record<string, string>;
       return Object.fromEntries(
-        Object.entries(parsed).filter(([, value]) => isDirectorySortMode(value)),
+        Object.entries(parsed).filter(([, value]) =>
+          isDirectorySortMode(value),
+        ),
       ) as Record<string, DirectorySortMode>;
     } catch {
       return {};
@@ -595,24 +772,36 @@ export function App() {
   });
   const [status, setStatus] = useState("Disconnected");
   const [file, setFile] = useState<FilePayload | null>(null);
-  const [viewerSelection, setViewerSelection] = useState<ViewerSelection | null>(null);
-  const [attachedFileContext, setAttachedFileContext] = useState<AttachedFileContext | null>(null);
+  const [viewerSelection, setViewerSelection] =
+    useState<ViewerSelection | null>(null);
+  const [attachedFileContext, setAttachedFileContext] =
+    useState<AttachedFileContext | null>(null);
   const [pluginVersion, setPluginVersion] = useState(0);
   const [pluginLoading, setPluginLoading] = useState(false);
   const [pluginBypass, setPluginBypass] = useState(false);
-  const [pluginQuery, setPluginQuery] = useState<Record<string, string>>(() => readURLState().pluginQuery);
-  const pluginQueryRef = useRef<Record<string, string>>(readURLState().pluginQuery);
+  const [pluginQuery, setPluginQuery] = useState<Record<string, string>>(
+    () => readURLState().pluginQuery,
+  );
+  const pluginQueryRef = useRef<Record<string, string>>(
+    readURLState().pluginQuery,
+  );
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
-  const [updateState, setUpdateState] = useState<UpdateState>(() => normalizeUpdateState(null));
+  const [updateState, setUpdateState] = useState<UpdateState>(() =>
+    normalizeUpdateState(null),
+  );
   const [updateSubmitting, setUpdateSubmitting] = useState(false);
 
   const ensureCompletionAudioContext = useCallback((): AudioContext | null => {
     if (typeof window === "undefined") {
       return null;
     }
-    const AudioContextCtor = window.AudioContext || (window as typeof window & {
-      webkitAudioContext?: typeof AudioContext;
-    }).webkitAudioContext;
+    const AudioContextCtor =
+      window.AudioContext ||
+      (
+        window as typeof window & {
+          webkitAudioContext?: typeof AudioContext;
+        }
+      ).webkitAudioContext;
     if (!AudioContextCtor) {
       return null;
     }
@@ -635,10 +824,12 @@ export function App() {
         completionAudioUnlockedRef.current = true;
         return;
       }
-      void audioContext.resume().then(() => {
-        completionAudioUnlockedRef.current = audioContext.state === "running";
-      }).catch(() => {
-      });
+      void audioContext
+        .resume()
+        .then(() => {
+          completionAudioUnlockedRef.current = audioContext.state === "running";
+        })
+        .catch(() => {});
     };
     const options: AddEventListenerOptions = { passive: true };
     window.addEventListener("pointerdown", unlockAudio, options);
@@ -654,12 +845,22 @@ export function App() {
   const handleStartUpdate = useCallback(async () => {
     const next = normalizeUpdateState(updateState);
     const status = (next.status || "idle").toLowerCase();
-    if (status === "downloading" || status === "installing" || status === "restarting") {
+    if (
+      status === "downloading" ||
+      status === "installing" ||
+      status === "restarting"
+    ) {
       return;
     }
     if (next.has_update && status === "available") {
-      const target = next.latest_version ? `v${next.latest_version}` : "the latest version";
-      if (!window.confirm(`Install ${target} now? MindFS will restart after the update finishes.`)) {
+      const target = next.latest_version
+        ? `v${next.latest_version}`
+        : "the latest version";
+      if (
+        !window.confirm(
+          `Install ${target} now? MindFS will restart after the update finishes.`,
+        )
+      ) {
         return;
       }
     }
@@ -667,12 +868,15 @@ export function App() {
     try {
       setUpdateState(normalizeUpdateState(await triggerUpdate()));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to start update";
-      setUpdateState((prev) => normalizeUpdateState({
-        ...prev,
-        status: "failed",
-        message,
-      }));
+      const message =
+        error instanceof Error ? error.message : "Failed to start update";
+      setUpdateState((prev) =>
+        normalizeUpdateState({
+          ...prev,
+          status: "failed",
+          message,
+        }),
+      );
     } finally {
       setUpdateSubmitting(false);
     }
@@ -708,7 +912,31 @@ export function App() {
     }
   }, [ensureCompletionAudioContext]);
 
-  useEffect(() => { currentRootIdRef.current = currentRootId; }, [currentRootId]);
+  useEffect(() => {
+    currentRootIdRef.current = currentRootId;
+  }, [currentRootId]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchAgents(true)
+      .then((items) => {
+        if (cancelled) return;
+        setAvailableAgents(items);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [agentsVersion]);
+  useEffect(() => {
+    if (!importMenuOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!importMenuRef.current?.contains(event.target as Node)) {
+        setImportMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [importMenuOpen]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -717,28 +945,51 @@ export function App() {
       window.localStorage.setItem(LAST_ROOT_STORAGE_KEY, currentRootId);
     }
   }, [currentRootId]);
-  useEffect(() => { expandedRef.current = expanded; }, [expanded]);
-  useEffect(() => { selectedDirRef.current = selectedDir; }, [selectedDir]);
-  useEffect(() => { entriesByPathRef.current = entriesByPath; }, [entriesByPath]);
-  useEffect(() => { fileRef.current = file; }, [file]);
-  useEffect(() => { viewerSelectionRef.current = viewerSelection; }, [viewerSelection]);
-  useEffect(() => { pluginQueryRef.current = pluginQuery; }, [pluginQuery]);
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
+  useEffect(() => {
+    selectedDirRef.current = selectedDir;
+  }, [selectedDir]);
+  useEffect(() => {
+    entriesByPathRef.current = entriesByPath;
+  }, [entriesByPath]);
+  useEffect(() => {
+    fileRef.current = file;
+  }, [file]);
+  useEffect(() => {
+    viewerSelectionRef.current = viewerSelection;
+  }, [viewerSelection]);
+  useEffect(() => {
+    pluginQueryRef.current = pluginQuery;
+  }, [pluginQuery]);
   useEffect(() => {
     if (!file?.path || !currentRootId) return;
     const nextKey = `${currentRootId}:${file.path}`;
     if (lastPluginResetFileKeyRef.current !== nextKey) {
       pluginBypassRef.current = false;
-    setPluginBypass(false);
+      setPluginBypass(false);
       lastPluginResetFileKeyRef.current = nextKey;
     }
   }, [file?.path, currentRootId]);
   useEffect(() => {
     pluginBypassRef.current = pluginBypass;
   }, [pluginBypass]);
-  useEffect(() => { selectedSessionRef.current = selectedSession; }, [selectedSession]);
-  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
-  useEffect(() => { currentSessionRef.current = currentSession; }, [currentSession]);
-  useEffect(() => { interactionModeRef.current = interactionMode; }, [interactionMode]);
+  useEffect(() => {
+    selectedSessionRef.current = selectedSession;
+  }, [selectedSession]);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+  useEffect(() => {
+    externalSessionsRef.current = externalSessions;
+  }, [externalSessions]);
+  useEffect(() => {
+    currentSessionRef.current = currentSession;
+  }, [currentSession]);
+  useEffect(() => {
+    interactionModeRef.current = interactionMode;
+  }, [interactionMode]);
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -749,7 +1000,10 @@ export function App() {
     if (typeof window === "undefined") {
       return;
     }
-    window.localStorage.setItem(DIRECTORY_SORT_OVERRIDES_STORAGE_KEY, JSON.stringify(directorySortOverrides));
+    window.localStorage.setItem(
+      DIRECTORY_SORT_OVERRIDES_STORAGE_KEY,
+      JSON.stringify(directorySortOverrides),
+    );
   }, [directorySortOverrides]);
   useEffect(() => {
     const rootID = currentRootId;
@@ -759,40 +1013,57 @@ export function App() {
     setIsDrawerOpen(!!drawerOpenByRootRef.current[rootID]);
   }, [currentRootId]);
 
-  const setBoundSessionForRoot = useCallback((rootID: string | null | undefined, key: string | null) => {
-    if (!rootID) return;
-    boundSessionByRootRef.current[rootID] = key;
-    if (currentRootIdRef.current === rootID) {
-      setActiveBoundSessionKey(key);
-    }
-  }, []);
+  const setBoundSessionForRoot = useCallback(
+    (rootID: string | null | undefined, key: string | null) => {
+      if (!rootID) return;
+      boundSessionByRootRef.current[rootID] = key;
+      if (currentRootIdRef.current === rootID) {
+        setActiveBoundSessionKey(key);
+      }
+    },
+    [],
+  );
 
-  const setDrawerSessionForRoot = useCallback((rootID: string | null | undefined, session: Session | null) => {
-    if (!rootID) return;
-    drawerSessionByRootRef.current[rootID] = session;
-    if (currentRootIdRef.current === rootID) {
-      setCurrentSession(session);
-    }
-  }, []);
+  const setDrawerSessionForRoot = useCallback(
+    (rootID: string | null | undefined, session: Session | null) => {
+      if (!rootID) return;
+      drawerSessionByRootRef.current[rootID] = session;
+      if (currentRootIdRef.current === rootID) {
+        setCurrentSession(session);
+      }
+    },
+    [],
+  );
 
-  const setDrawerOpenForRoot = useCallback((rootID: string | null | undefined, open: boolean) => {
-    if (!rootID) return;
-    drawerOpenByRootRef.current[rootID] = open;
-    if (currentRootIdRef.current === rootID) {
-      setIsDrawerOpen(open);
-    }
-  }, []);
+  const setDrawerOpenForRoot = useCallback(
+    (rootID: string | null | undefined, open: boolean) => {
+      if (!rootID) return;
+      drawerOpenByRootRef.current[rootID] = open;
+      if (currentRootIdRef.current === rootID) {
+        setIsDrawerOpen(open);
+      }
+    },
+    [],
+  );
 
-  const getDirectorySortKey = useCallback((rootID: string | null | undefined, dirPath: string | null | undefined) => {
-    if (!rootID) {
-      return "";
-    }
-    const normalizedDir = !dirPath || dirPath === rootID ? "." : dirPath;
-    return `${rootID}:${normalizedDir}`;
-  }, []);
+  const getDirectorySortKey = useCallback(
+    (rootID: string | null | undefined, dirPath: string | null | undefined) => {
+      if (!rootID) {
+        return "";
+      }
+      const normalizedDir = !dirPath || dirPath === rootID ? "." : dirPath;
+      return `${rootID}:${normalizedDir}`;
+    },
+    [],
+  );
 
-  const currentDirectorySortKey = getDirectorySortKey(currentRootId, selectedDir);
-  const currentDirectorySortOverride = currentDirectorySortKey ? directorySortOverrides[currentDirectorySortKey] : undefined;
+  const currentDirectorySortKey = getDirectorySortKey(
+    currentRootId,
+    selectedDir,
+  );
+  const currentDirectorySortOverride = currentDirectorySortKey
+    ? directorySortOverrides[currentDirectorySortKey]
+    : undefined;
   const currentDirectorySortMode = currentDirectorySortOverride || treeSortMode;
 
   const replaceURLState = useCallback((next: URLState) => {
@@ -802,7 +1073,9 @@ export function App() {
   }, []);
 
   const redirectToRelayLogin = useCallback(() => {
-    const next = encodeURIComponent(`${window.location.pathname}${window.location.search}`);
+    const next = encodeURIComponent(
+      `${window.location.pathname}${window.location.search}`,
+    );
     window.location.replace(`/login?next=${next}`);
   }, []);
 
@@ -810,333 +1083,489 @@ export function App() {
     window.location.replace("/nodes");
   }, []);
 
-  const handleRelayNavigationFailure = useCallback((status: number, errorCode?: string | null) => {
-    if (!isRelayPWAContext()) {
+  const handleRelayNavigationFailure = useCallback(
+    (status: number, errorCode?: string | null) => {
+      if (!isRelayPWAContext()) {
+        return false;
+      }
+      const code = String(errorCode || "").trim();
+      if (status === 401 || code === "unauthorized") {
+        redirectToRelayLogin();
+        return true;
+      }
+      if (
+        status === 403 ||
+        status === 404 ||
+        status === 502 ||
+        status === 503 ||
+        code === "forbidden" ||
+        code === "node_not_found" ||
+        code === "node_offline" ||
+        code === "connector_unavailable"
+      ) {
+        redirectToRelayNodes();
+        return true;
+      }
       return false;
-    }
-    const code = String(errorCode || "").trim();
-    if (status === 401 || code === "unauthorized") {
-      redirectToRelayLogin();
-      return true;
-    }
-    if (
-      status === 403 ||
-      status === 404 ||
-      status === 502 ||
-      status === 503 ||
-      code === "forbidden" ||
-      code === "node_not_found" ||
-      code === "node_offline" ||
-      code === "connector_unavailable"
-    ) {
-      redirectToRelayNodes();
-      return true;
-    }
-    return false;
-  }, [redirectToRelayLogin, redirectToRelayNodes]);
+    },
+    [redirectToRelayLogin, redirectToRelayNodes],
+  );
 
-  const rootSessionKey = useCallback((rootId: string, sessionKey: string) => `${rootId}::${sessionKey}`, []);
+  const rootSessionKey = useCallback(
+    (rootId: string, sessionKey: string) => `${rootId}::${sessionKey}`,
+    [],
+  );
   const bumpCacheVersion = useCallback(() => setCacheVersion((v) => v + 1), []);
-  const mergeSessionItems = useCallback((current: SessionItem[], incoming: SessionItem[]) => {
-    const byKey = new Map<string, SessionItem>();
-    for (const item of current) {
-      const key = item.key || item.session_key;
-      if (key) {
-        byKey.set(key, item);
-      }
-    }
-    for (const item of incoming) {
-      const key = item.key || item.session_key;
-      if (!key) {
-        continue;
-      }
-      byKey.set(key, { ...(byKey.get(key) || {}), ...item });
-    }
-    return Array.from(byKey.values()).sort((a, b) => {
-      const left = Date.parse(a.updated_at || "") || 0;
-      const right = Date.parse(b.updated_at || "") || 0;
-      return right - left;
-    });
-  }, []);
-  const resolveRootForSessionKey = useCallback((sessionKey: string): string | null => {
-    if (!sessionKey) return null;
-    const currentRoot = currentRootIdRef.current;
-    if (currentRoot && sessionCacheRef.current[rootSessionKey(currentRoot, sessionKey)]) {
-      return currentRoot;
-    }
-    for (const [rootID, key] of Object.entries(boundSessionByRootRef.current)) {
-      if (key === sessionKey) {
-        return rootID;
-      }
-    }
-    for (const [rootID, session] of Object.entries(drawerSessionByRootRef.current)) {
-      if (session?.key === sessionKey) {
-        return rootID;
-      }
-    }
-    const suffix = `::${sessionKey}`;
-    const matched = Object.keys(sessionCacheRef.current).find((key) => key.endsWith(suffix));
-    if (!matched) return null;
-    return matched.slice(0, matched.length-suffix.length);
-  }, [rootSessionKey]);
-  const getSessionSnapshot = useCallback((rootId: string | null | undefined, session: Session | SessionItem | null | undefined) => {
-    if (!rootId || !session) return null;
-    const key = (session as any).key || (session as any).session_key;
-    if (!key) return null;
-    const ck = rootSessionKey(rootId, key);
-    const cached = sessionCacheRef.current[ck];
-    const drawerSession = drawerSessionByRootRef.current[rootId];
-    const fallbackExchanges = Array.isArray((session as any).exchanges) ? ((session as any).exchanges as Exchange[]) : [];
-    const exchanges = Array.isArray((cached as any)?.exchanges) ? (((cached as any).exchanges as Exchange[]) || []) : fallbackExchanges;
-    const pending = drawerSession?.key === key
-      ? !!(drawerSession as any)?.pending
-      : typeof (session as any)?.pending === "boolean"
-        ? !!(session as any).pending
-        : typeof (cached as any)?.pending === "boolean"
-          ? !!(cached as any).pending
-          : undefined;
-    return { ...(session as any), ...(cached as any), ...(drawerSession?.key === key ? (drawerSession as any) : null), key, exchanges, pending } as any;
-  }, [rootSessionKey, cacheVersion]);
-
-  const setSelectedPendingByKey = useCallback((sessionKey: string, pending: boolean) => {
-    setSelectedSession((prev) => {
-      const prevKey = prev?.key || prev?.session_key;
-      if (!prev || prevKey !== sessionKey) return prev;
-      return { ...(prev as any), pending } as SessionItem;
-    });
-  }, []);
-
-  const updateSessionRelatedFilesForKey = useCallback((rootID: string, sessionKey: string, relatedFiles: RelatedFile[]) => {
-    if (!rootID || !sessionKey) return;
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const cached = sessionCacheRef.current[cacheKey];
-    const nextRelatedFiles = Array.isArray(relatedFiles) ? [...relatedFiles] : [];
-    if (cached) {
-      sessionCacheRef.current[cacheKey] = {
-        ...(cached as any),
-        related_files: nextRelatedFiles,
-      } as Session;
-    }
-    setSelectedSession((prev) => {
-      const prevKey = prev?.key || prev?.session_key;
-      const prevRoot = (prev?.root_id as string | undefined) || currentRootIdRef.current;
-      if (!prev || prevKey !== sessionKey || prevRoot !== rootID) return prev;
-      return { ...(prev as any), related_files: nextRelatedFiles } as SessionItem;
-    });
-    const current = drawerSessionByRootRef.current[rootID];
-    if (current && current.key === sessionKey) {
-      setDrawerSessionForRoot(rootID, { ...(current as any), related_files: nextRelatedFiles } as Session);
-    }
-    bumpCacheVersion();
-  }, [rootSessionKey, setDrawerSessionForRoot, bumpCacheVersion]);
-
-  const updateSessionAgentForKey = useCallback((rootID: string, sessionKey: string, agent: string, model?: string) => {
-    if (!rootID || !sessionKey || !agent) return;
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const cached = sessionCacheRef.current[cacheKey];
-    if (cached) {
-      sessionCacheRef.current[cacheKey] = {
-        ...(cached as any),
-        agent,
-        model: model || "",
-        updated_at: new Date().toISOString(),
-      } as Session;
-    }
-    setSelectedSession((prev) => {
-      const prevKey = prev?.key || prev?.session_key;
-      const prevRoot = (prev?.root_id as string | undefined) || currentRootIdRef.current;
-      if (!prev || prevKey !== sessionKey || prevRoot !== rootID) return prev;
-      return { ...(prev as any), agent, model: model || "" } as SessionItem;
-    });
-    const current = drawerSessionByRootRef.current[rootID];
-    if (current && current.key === sessionKey && (current.agent !== agent || (current as any).model !== (model || ""))) {
-      setDrawerSessionForRoot(rootID, { ...(current as any), agent, model: model || "" } as Session);
-    }
-    bumpCacheVersion();
-  }, [rootSessionKey, setDrawerSessionForRoot, bumpCacheVersion]);
-
-  const resolveAgentForSession = useCallback((rootID: string, sessionKey: string, fallbackAgent?: string): string => {
-    if (fallbackAgent) return fallbackAgent;
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const cached = sessionCacheRef.current[cacheKey] as any;
-    if (cached?.agent) return cached.agent;
-    const current = currentSessionRef.current as any;
-    if (current?.key === sessionKey && current?.agent) return current.agent;
-    const selected = selectedSessionRef.current as any;
-    if ((selected?.key || selected?.session_key) === sessionKey && selected?.agent) return selected.agent;
-    return "";
-  }, [rootSessionKey]);
-
-  const appendAgentChunkForSession = useCallback((rootID: string, sessionKey: string, content: string, agentHint?: string) => {
-    if (!content) return;
-    const now = new Date().toISOString();
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const resolvedAgent = resolveAgentForSession(rootID, sessionKey, agentHint);
-    const updateList = (prevList: Exchange[]) => {
-      const list = [...(prevList || [])];
-      const last = list.length > 0 ? list[list.length - 1] : null;
-      if (last && (last.role === "agent" || last.role === "assistant")) {
-        list[list.length - 1] = { ...last, agent: last.agent || resolvedAgent, content: `${last.content || ""}${content}`, timestamp: now };
-        return list;
-      }
-      list.push({ role: "agent", agent: resolvedAgent, content, timestamp: now });
-      return list;
-    };
-    const cached = sessionCacheRef.current[cacheKey];
-    const base = cached || ({
-      key: sessionKey,
-      type: "chat",
-      agent: resolvedAgent,
-      name: "",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      exchanges: [],
-    } as any);
-    const nextList = updateList((((base as any).exchanges || []) as Exchange[]));
-    sessionCacheRef.current[cacheKey] = {
-      ...(base as any),
-      agent: (base as any).agent || resolvedAgent,
-      exchanges: nextList,
-      updated_at: new Date().toISOString(),
-    } as Session;
-    bumpCacheVersion();
-  }, [rootSessionKey, resolveAgentForSession, bumpCacheVersion]);
-
-  const appendThoughtChunkForSession = useCallback((rootID: string, sessionKey: string, content: string) => {
-    if (!content) return;
-    const now = new Date().toISOString();
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const updateList = (prevList: Exchange[]) => {
-      const list = [...(prevList || [])];
-      const last = list.length > 0 ? list[list.length - 1] : null;
-      if (last && last.role === "thought") {
-        list[list.length - 1] = { ...last, content: `${last.content || ""}${content}`, timestamp: now };
-        return list;
-      }
-      list.push({ role: "thought", content, timestamp: now });
-      return list;
-    };
-    const cached = sessionCacheRef.current[cacheKey];
-    const base = cached || ({
-      key: sessionKey,
-      type: "chat",
-      agent: "",
-      name: "",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      exchanges: [],
-    } as any);
-    const nextList = updateList((((base as any).exchanges || []) as Exchange[]));
-    sessionCacheRef.current[cacheKey] = {
-      ...(base as any),
-      exchanges: nextList,
-      updated_at: new Date().toISOString(),
-    } as Session;
-    bumpCacheVersion();
-  }, [rootSessionKey, bumpCacheVersion]);
-
-  const appendToolCallForSession = useCallback((rootID: string, sessionKey: string, toolCall: any, update: boolean) => {
-    if (!toolCall) return;
-    const now = new Date().toISOString();
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    const mergeToolCall = (existing: any, incoming: any) => {
-      const merged = { ...(existing || {}), ...incoming };
-      if (!incoming.kind && existing?.kind) merged.kind = existing.kind;
-      if (!incoming.title && existing?.title) merged.title = existing.title;
-      return merged;
-    };
-    const updateList = (prevList: Exchange[]) => {
-      const list = [...(prevList || [])];
-      const callId = toolCall.callId || toolCall.toolCallId || toolCall.tool_call_id || "";
-      if (update && callId) {
-        for (let i = list.length - 1; i >= 0; i--) {
-          if (list[i]?.role === "tool" && (list[i]?.toolCall?.callId === callId || list[i]?.toolCall?.toolCallId === callId || list[i]?.toolCall?.tool_call_id === callId)) {
-            list[i] = { ...list[i], timestamp: now, toolCall: mergeToolCall(list[i].toolCall, toolCall) };
-            return list;
-          }
+  const mergeSessionItems = useCallback(
+    (current: SessionItem[], incoming: SessionItem[]) => {
+      const byKey = new Map<string, SessionItem>();
+      for (const item of current) {
+        const key = item.key || item.session_key;
+        if (key) {
+          byKey.set(key, item);
         }
       }
-      list.push({ role: "tool", content: "", timestamp: now, toolCall });
-      return list;
-    };
-    const cached = sessionCacheRef.current[cacheKey];
-    const base = cached || ({
-      key: sessionKey,
-      type: "chat",
-      agent: "",
-      name: "",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      exchanges: [],
-    } as any);
-    const nextList = updateList((((base as any).exchanges || []) as Exchange[]));
-    sessionCacheRef.current[cacheKey] = {
-      ...(base as any),
-      exchanges: nextList,
-      updated_at: new Date().toISOString(),
-    } as Session;
-    bumpCacheVersion();
-  }, [rootSessionKey, bumpCacheVersion]);
+      for (const item of incoming) {
+        const key = item.key || item.session_key;
+        if (!key) {
+          continue;
+        }
+        byKey.set(key, { ...(byKey.get(key) || {}), ...item });
+      }
+      return Array.from(byKey.values()).sort((a, b) => {
+        const left = Date.parse(a.updated_at || "") || 0;
+        const right = Date.parse(b.updated_at || "") || 0;
+        return right - left;
+      });
+    },
+    [],
+  );
+  const resolveRootForSessionKey = useCallback(
+    (sessionKey: string): string | null => {
+      if (!sessionKey) return null;
+      const currentRoot = currentRootIdRef.current;
+      if (
+        currentRoot &&
+        sessionCacheRef.current[rootSessionKey(currentRoot, sessionKey)]
+      ) {
+        return currentRoot;
+      }
+      for (const [rootID, key] of Object.entries(
+        boundSessionByRootRef.current,
+      )) {
+        if (key === sessionKey) {
+          return rootID;
+        }
+      }
+      for (const [rootID, session] of Object.entries(
+        drawerSessionByRootRef.current,
+      )) {
+        if (session?.key === sessionKey) {
+          return rootID;
+        }
+      }
+      const suffix = `::${sessionKey}`;
+      const matched = Object.keys(sessionCacheRef.current).find((key) =>
+        key.endsWith(suffix),
+      );
+      if (!matched) return null;
+      return matched.slice(0, matched.length - suffix.length);
+    },
+    [rootSessionKey],
+  );
+  const getSessionSnapshot = useCallback(
+    (
+      rootId: string | null | undefined,
+      session: Session | SessionItem | null | undefined,
+    ) => {
+      if (!rootId || !session) return null;
+      const key = (session as any).key || (session as any).session_key;
+      if (!key) return null;
+      const ck = rootSessionKey(rootId, key);
+      const cached = sessionCacheRef.current[ck];
+      const drawerSession = drawerSessionByRootRef.current[rootId];
+      const fallbackExchanges = Array.isArray((session as any).exchanges)
+        ? ((session as any).exchanges as Exchange[])
+        : [];
+      const exchanges = Array.isArray((cached as any)?.exchanges)
+        ? ((cached as any).exchanges as Exchange[]) || []
+        : fallbackExchanges;
+      const pending =
+        drawerSession?.key === key
+          ? !!(drawerSession as any)?.pending
+          : typeof (session as any)?.pending === "boolean"
+            ? !!(session as any).pending
+            : typeof (cached as any)?.pending === "boolean"
+              ? !!(cached as any).pending
+              : undefined;
+      return {
+        ...(session as any),
+        ...(cached as any),
+        ...(drawerSession?.key === key ? (drawerSession as any) : null),
+        key,
+        exchanges,
+        pending,
+      } as any;
+    },
+    [rootSessionKey, cacheVersion],
+  );
+
+  const setSelectedPendingByKey = useCallback(
+    (sessionKey: string, pending: boolean) => {
+      setSelectedSession((prev) => {
+        const prevKey = prev?.key || prev?.session_key;
+        if (!prev || prevKey !== sessionKey) return prev;
+        return { ...(prev as any), pending } as SessionItem;
+      });
+    },
+    [],
+  );
+
+  const updateSessionRelatedFilesForKey = useCallback(
+    (rootID: string, sessionKey: string, relatedFiles: RelatedFile[]) => {
+      if (!rootID || !sessionKey) return;
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const cached = sessionCacheRef.current[cacheKey];
+      const nextRelatedFiles = Array.isArray(relatedFiles)
+        ? [...relatedFiles]
+        : [];
+      if (cached) {
+        sessionCacheRef.current[cacheKey] = {
+          ...(cached as any),
+          related_files: nextRelatedFiles,
+        } as Session;
+      }
+      setSelectedSession((prev) => {
+        const prevKey = prev?.key || prev?.session_key;
+        const prevRoot =
+          (prev?.root_id as string | undefined) || currentRootIdRef.current;
+        if (!prev || prevKey !== sessionKey || prevRoot !== rootID) return prev;
+        return {
+          ...(prev as any),
+          related_files: nextRelatedFiles,
+        } as SessionItem;
+      });
+      const current = drawerSessionByRootRef.current[rootID];
+      if (current && current.key === sessionKey) {
+        setDrawerSessionForRoot(rootID, {
+          ...(current as any),
+          related_files: nextRelatedFiles,
+        } as Session);
+      }
+      bumpCacheVersion();
+    },
+    [rootSessionKey, setDrawerSessionForRoot, bumpCacheVersion],
+  );
+
+  const updateSessionAgentForKey = useCallback(
+    (rootID: string, sessionKey: string, agent: string, model?: string) => {
+      if (!rootID || !sessionKey || !agent) return;
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const cached = sessionCacheRef.current[cacheKey];
+      if (cached) {
+        sessionCacheRef.current[cacheKey] = {
+          ...(cached as any),
+          agent,
+          model: model || "",
+          updated_at: new Date().toISOString(),
+        } as Session;
+      }
+      setSelectedSession((prev) => {
+        const prevKey = prev?.key || prev?.session_key;
+        const prevRoot =
+          (prev?.root_id as string | undefined) || currentRootIdRef.current;
+        if (!prev || prevKey !== sessionKey || prevRoot !== rootID) return prev;
+        return { ...(prev as any), agent, model: model || "" } as SessionItem;
+      });
+      const current = drawerSessionByRootRef.current[rootID];
+      if (
+        current &&
+        current.key === sessionKey &&
+        (current.agent !== agent || (current as any).model !== (model || ""))
+      ) {
+        setDrawerSessionForRoot(rootID, {
+          ...(current as any),
+          agent,
+          model: model || "",
+        } as Session);
+      }
+      bumpCacheVersion();
+    },
+    [rootSessionKey, setDrawerSessionForRoot, bumpCacheVersion],
+  );
+
+  const resolveAgentForSession = useCallback(
+    (rootID: string, sessionKey: string, fallbackAgent?: string): string => {
+      if (fallbackAgent) return fallbackAgent;
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const cached = sessionCacheRef.current[cacheKey] as any;
+      if (cached?.agent) return cached.agent;
+      const current = currentSessionRef.current as any;
+      if (current?.key === sessionKey && current?.agent) return current.agent;
+      const selected = selectedSessionRef.current as any;
+      if (
+        (selected?.key || selected?.session_key) === sessionKey &&
+        selected?.agent
+      )
+        return selected.agent;
+      return "";
+    },
+    [rootSessionKey],
+  );
+
+  const appendAgentChunkForSession = useCallback(
+    (
+      rootID: string,
+      sessionKey: string,
+      content: string,
+      agentHint?: string,
+    ) => {
+      if (!content) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const resolvedAgent = resolveAgentForSession(
+        rootID,
+        sessionKey,
+        agentHint,
+      );
+      const updateList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        const last = list.length > 0 ? list[list.length - 1] : null;
+        if (last && (last.role === "agent" || last.role === "assistant")) {
+          list[list.length - 1] = {
+            ...last,
+            agent: last.agent || resolvedAgent,
+            content: `${last.content || ""}${content}`,
+            timestamp: now,
+          };
+          return list;
+        }
+        list.push({
+          role: "agent",
+          agent: resolvedAgent,
+          content,
+          timestamp: now,
+        });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          agent: resolvedAgent,
+          name: "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exchanges: [],
+        } as any);
+      const nextList = updateList(
+        ((base as any).exchanges || []) as Exchange[],
+      );
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        agent: (base as any).agent || resolvedAgent,
+        exchanges: nextList,
+        updated_at: new Date().toISOString(),
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, resolveAgentForSession, bumpCacheVersion],
+  );
+
+  const appendThoughtChunkForSession = useCallback(
+    (rootID: string, sessionKey: string, content: string) => {
+      if (!content) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const updateList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        const last = list.length > 0 ? list[list.length - 1] : null;
+        if (last && last.role === "thought") {
+          list[list.length - 1] = {
+            ...last,
+            content: `${last.content || ""}${content}`,
+            timestamp: now,
+          };
+          return list;
+        }
+        list.push({ role: "thought", content, timestamp: now });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          agent: "",
+          name: "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exchanges: [],
+        } as any);
+      const nextList = updateList(
+        ((base as any).exchanges || []) as Exchange[],
+      );
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        exchanges: nextList,
+        updated_at: new Date().toISOString(),
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, bumpCacheVersion],
+  );
+
+  const appendToolCallForSession = useCallback(
+    (rootID: string, sessionKey: string, toolCall: any, update: boolean) => {
+      if (!toolCall) return;
+      const now = new Date().toISOString();
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      const mergeToolCall = (existing: any, incoming: any) => {
+        const merged = { ...(existing || {}), ...incoming };
+        if (!incoming.kind && existing?.kind) merged.kind = existing.kind;
+        if (!incoming.title && existing?.title) merged.title = existing.title;
+        return merged;
+      };
+      const updateList = (prevList: Exchange[]) => {
+        const list = [...(prevList || [])];
+        const callId =
+          toolCall.callId || toolCall.toolCallId || toolCall.tool_call_id || "";
+        if (update && callId) {
+          for (let i = list.length - 1; i >= 0; i--) {
+            if (
+              list[i]?.role === "tool" &&
+              (list[i]?.toolCall?.callId === callId ||
+                list[i]?.toolCall?.toolCallId === callId ||
+                list[i]?.toolCall?.tool_call_id === callId)
+            ) {
+              list[i] = {
+                ...list[i],
+                timestamp: now,
+                toolCall: mergeToolCall(list[i].toolCall, toolCall),
+              };
+              return list;
+            }
+          }
+        }
+        list.push({ role: "tool", content: "", timestamp: now, toolCall });
+        return list;
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      const base =
+        cached ||
+        ({
+          key: sessionKey,
+          type: "chat",
+          agent: "",
+          name: "",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          exchanges: [],
+        } as any);
+      const nextList = updateList(
+        ((base as any).exchanges || []) as Exchange[],
+      );
+      sessionCacheRef.current[cacheKey] = {
+        ...(base as any),
+        exchanges: nextList,
+        updated_at: new Date().toISOString(),
+      } as Session;
+      bumpCacheVersion();
+    },
+    [rootSessionKey, bumpCacheVersion],
+  );
 
   const normalizeTreeResponse = useCallback((payload: any) => {
-    if (payload && payload.entries) return { entries: payload.entries as FileEntry[] };
+    if (payload && payload.entries)
+      return { entries: payload.entries as FileEntry[] };
     return { entries: [] };
   }, []);
 
-  const treeCacheKey = useCallback((rootID: string, dirPath: string) => `${rootID}:${dirPath || "."}`, []);
+  const treeCacheKey = useCallback(
+    (rootID: string, dirPath: string) => `${rootID}:${dirPath || "."}`,
+    [],
+  );
 
-  const refreshTreeDir = useCallback(async (rootID: string, dirPath: string, syncMain: boolean) => {
-    try {
-      const res = await fetch(appURL("/api/tree", new URLSearchParams({ root: rootID, dir: dirPath })));
-      if (!res.ok) return;
-      const payload = await res.json();
-      const parsed = normalizeTreeResponse(payload);
-      invalidTreeCacheKeysRef.current.delete(treeCacheKey(rootID, dirPath));
-      setEntriesByPath((prev) => ({ ...prev, [treeCacheKey(rootID, dirPath)]: parsed.entries }));
-      if (syncMain) {
-        setMainEntries(parsed.entries);
-      }
-    } catch {
-    }
-  }, [normalizeTreeResponse, treeCacheKey]);
-
-  const refreshCurrentFileContent = useCallback(async (rootID: string, changedPath: string) => {
-    const currentFile = fileRef.current;
-    if (!currentFile) return;
-    const currentRoot = currentFile.root || currentRootIdRef.current || "";
-    if (currentRoot !== rootID || currentFile.path !== changedPath) return;
-
-    let readMode: "incremental" | "full" = "incremental";
-    if (!pluginBypassRef.current) {
+  const refreshTreeDir = useCallback(
+    async (rootID: string, dirPath: string, syncMain: boolean) => {
       try {
-        const plugin = pluginManagerRef.current.match(rootID, buildMatchInputFromPath(changedPath, pluginQueryRef.current));
-        readMode = inferReadModeFromPlugin(plugin);
-      } catch {
-        readMode = "incremental";
-      }
-    }
+        const res = await fetch(
+          appURL(
+            "/api/tree",
+            new URLSearchParams({ root: rootID, dir: dirPath }),
+          ),
+        );
+        if (!res.ok) return;
+        const payload = await res.json();
+        const parsed = normalizeTreeResponse(payload);
+        invalidTreeCacheKeysRef.current.delete(treeCacheKey(rootID, dirPath));
+        setEntriesByPath((prev) => ({
+          ...prev,
+          [treeCacheKey(rootID, dirPath)]: parsed.entries,
+        }));
+        if (syncMain) {
+          setMainEntries(parsed.entries);
+        }
+      } catch {}
+    },
+    [normalizeTreeResponse, treeCacheKey],
+  );
 
-    try {
-      const next = await fetchFile({
-        rootId: rootID,
-        path: changedPath,
-        readMode,
-        cursor: fileCursorRef.current || 0,
-      });
-      const latestFile = fileRef.current;
-      const latestRoot = latestFile?.root || currentRootIdRef.current || "";
-      if (!next || !latestFile || latestRoot !== rootID || latestFile.path !== changedPath) {
-        return;
+  const refreshCurrentFileContent = useCallback(
+    async (rootID: string, changedPath: string) => {
+      const currentFile = fileRef.current;
+      if (!currentFile) return;
+      const currentRoot = currentFile.root || currentRootIdRef.current || "";
+      if (currentRoot !== rootID || currentFile.path !== changedPath) return;
+
+      let readMode: "incremental" | "full" = "incremental";
+      if (!pluginBypassRef.current) {
+        try {
+          const plugin = pluginManagerRef.current.match(
+            rootID,
+            buildMatchInputFromPath(changedPath, pluginQueryRef.current),
+          );
+          readMode = inferReadModeFromPlugin(plugin);
+        } catch {
+          readMode = "incremental";
+        }
       }
-      setFile({
-        ...next,
-        targetLine: latestFile.targetLine,
-        targetColumn: latestFile.targetColumn,
-      });
-    } catch (err) {
-      console.error("[file.refresh.changed] failed", { rootID, changedPath, err });
-    }
-  }, []);
+
+      try {
+        const next = await fetchFile({
+          rootId: rootID,
+          path: changedPath,
+          readMode,
+          cursor: fileCursorRef.current || 0,
+        });
+        const latestFile = fileRef.current;
+        const latestRoot = latestFile?.root || currentRootIdRef.current || "";
+        if (
+          !next ||
+          !latestFile ||
+          latestRoot !== rootID ||
+          latestFile.path !== changedPath
+        ) {
+          return;
+        }
+        setFile({
+          ...next,
+          targetLine: latestFile.targetLine,
+          targetColumn: latestFile.targetColumn,
+        });
+      } catch (err) {
+        console.error("[file.refresh.changed] failed", {
+          rootID,
+          changedPath,
+          err,
+        });
+      }
+    },
+    [],
+  );
 
   const refreshGitStatus = useCallback(async (rootID: string) => {
     if (!rootID) {
@@ -1150,7 +1579,11 @@ export function App() {
       return next;
     } catch (err) {
       console.error("[git.status] failed", { rootID, err });
-      const fallback = { available: false, dirty_count: 0, items: [] } as GitStatusPayload;
+      const fallback = {
+        available: false,
+        dirty_count: 0,
+        items: [],
+      } as GitStatusPayload;
       setGitStatus(fallback);
       return fallback;
     } finally {
@@ -1158,311 +1591,621 @@ export function App() {
     }
   }, []);
 
-  const openGitDiff = useCallback(async (rootID: string, item: GitStatusItem) => {
-    if (!rootID || !item?.path) {
-      return;
-    }
-    fileOpenRequestRef.current += 1;
-    setSelectedSession(null);
-    setFile(null);
-    setGitDiff(null);
-    replaceURLState({ root: rootID, file: "", session: "", cursor: 0, pluginQuery: {} });
-    try {
-      const next = await fetchGitDiff(rootID, item.path, { cacheSignature: buildGitDiffCacheSignature(item) });
-      setGitDiff(next);
-      if (currentRootIdRef.current !== rootID) {
-        setCurrentRootId(rootID);
-      }
-      if (isMobile) {
-        setIsLeftOpen(false);
-      }
-    } catch (err) {
-      console.error("[git.diff] failed", { rootID, path: item.path, err });
-    }
-  }, [isMobile, replaceURLState]);
-
-  const handleTreeUpload = useCallback(async (files: File[]) => {
-    const rootID = currentRootIdRef.current;
-    if (!rootID || files.length === 0) return;
-
-    const selectedDirPath = selectedDirRef.current === rootID ? "." : selectedDirRef.current;
-    const targetDir = selectedDirPath || (fileRef.current?.path ? dirnameOfPath(fileRef.current.path) : ".");
-    try {
-      const uploaded = await uploadFiles({
-        rootId: rootID,
-        dir: targetDir,
-        files,
-      });
-      uploaded.forEach((item) => {
-        if (typeof item?.path === "string" && item.path) {
-          invalidateFileCache(rootID, item.path);
-        }
-      });
-      const currentDir = (selectedDirRef.current === rootID ? "." : selectedDirRef.current) || ".";
-      const syncMain = rootID === currentRootIdRef.current && currentDir === targetDir;
-      await refreshTreeDir(rootID, targetDir, syncMain);
-      setExpanded((prev) => Array.from(new Set([
-        ...prev,
-        rootID,
-        targetDir === "." ? rootID : `${rootID}:${targetDir}`,
-      ])));
-    } catch (err) {
-      reportError("file.write_failed", String((err as Error)?.message || "上传文件失败"));
-    }
-  }, [refreshTreeDir]);
-
-  const handleSelectSession = useCallback(async (session: any) => {
-    const key = session?.key || session?.session_key;
-    const targetRoot = (session?.root_id as string | undefined) || currentRootIdRef.current;
-    if (!targetRoot || !key) return;
-    const currentDrawer = drawerSessionByRootRef.current[targetRoot];
-    const preservePending = currentDrawer?.key === key
-      ? !!(currentDrawer as any)?.pending
-      : !!(session as any)?.pending;
-    replaceURLState({ root: targetRoot, file: "", session: key, cursor: 0, pluginQuery: {} });
-    setSelectedSession({ ...(session as any), pending: preservePending } as SessionItem);
-    setInteractionMode("main");
-    setDrawerOpenForRoot(targetRoot, false);
-    if (isMobile) setIsRightOpen(false);
-    const cacheKey = rootSessionKey(targetRoot, key);
-    const applySession = (fullSession: Session) => {
-      const normalized = { ...(fullSession as any), key } as Session;
-      sessionCacheRef.current[cacheKey] = normalized;
-      setSelectedSession((prev) => {
-        const prevKey = prev?.key || prev?.session_key;
-        const prevRoot = (prev?.root_id as string | undefined) || currentRootIdRef.current;
-        if (prevKey !== key || prevRoot !== targetRoot) {
-          return prev;
-        }
-        return {
-          ...(prev as any),
-          ...(normalized as any),
-          pending: typeof (prev as any)?.pending === "boolean" ? !!(prev as any).pending : preservePending,
-          key,
-          session_key: key,
-          root_id: targetRoot,
-        } as SessionItem;
-      });
-      if ((boundSessionByRootRef.current[targetRoot] || null) === key) {
-        const activeDrawer = drawerSessionByRootRef.current[targetRoot];
-        setDrawerSessionForRoot(targetRoot, {
-          ...(normalized as any),
-          pending: activeDrawer?.key === key ? !!(activeDrawer as any)?.pending : preservePending,
-        } as Session);
-      }
-      bumpCacheVersion();
-    };
-    const cached = sessionCacheRef.current[cacheKey];
-    if (cached) {
-      applySession(cached);
-      if (hasSessionExchanges(cached)) {
-        loadedSessionRef.current[cacheKey] = true;
+  const openGitDiff = useCallback(
+    async (rootID: string, item: GitStatusItem) => {
+      if (!rootID || !item?.path) {
         return;
       }
-    } else {
-      const persisted = await getCachedSession(targetRoot, key);
-      if (persisted) {
-        applySession(persisted);
-      }
-    }
-    if (loadedSessionRef.current[cacheKey]) {
-      return;
-    }
-    try {
-      const inflight = loadingSessionRef.current[cacheKey];
-      if (inflight) {
-        const fullSession = await inflight;
-        if (fullSession) applySession(fullSession);
-        return;
-      }
-      const request = syncSession(targetRoot, key)
-        .finally(() => {
-          delete loadingSessionRef.current[cacheKey];
-        });
-      loadingSessionRef.current[cacheKey] = request;
-      const syncResult = await request;
-      const fullSession = syncResult.session;
-      if (fullSession) {
-        applySession(fullSession as Session);
-        loadedSessionRef.current[cacheKey] = true;
-        void sessionService.markSessionReady(targetRoot, key);
-      }
-    } catch (err) {}
-  }, [isMobile, rootSessionKey, bumpCacheVersion, setDrawerOpenForRoot, setDrawerSessionForRoot, replaceURLState]);
-
-  const handleDeleteSession = useCallback(async (session: SessionItem) => {
-    const sessionKey = session?.key || session?.session_key;
-    const rootID = (session?.root_id as string | undefined) || currentRootIdRef.current;
-    if (!rootID || !sessionKey) return;
-
-    const deleted = await sessionService.deleteSession(rootID, sessionKey);
-    if (!deleted) {
-      reportError("session.delete_failed", "删除会话失败");
-      return;
-    }
-
-    setSessions((prev) => prev.filter((item) => (item.key || item.session_key) !== sessionKey));
-
-    const cacheKey = rootSessionKey(rootID, sessionKey);
-    delete sessionCacheRef.current[cacheKey];
-    delete loadedSessionRef.current[cacheKey];
-    delete loadingSessionRef.current[cacheKey];
-    delete pendingBySessionRef.current[cacheKey];
-    delete cancelRequestedBySessionRef.current[cacheKey];
-    void deleteCachedSession(rootID, sessionKey);
-
-    if (boundSessionByRootRef.current[rootID] === sessionKey) {
-      setBoundSessionForRoot(rootID, null);
-    }
-    if (drawerSessionByRootRef.current[rootID]?.key === sessionKey) {
-      setDrawerSessionForRoot(rootID, null);
-      setDrawerOpenForRoot(rootID, false);
-    }
-
-    const selectedKey = selectedSessionRef.current?.key || selectedSessionRef.current?.session_key;
-    const selectedRoot = (selectedSessionRef.current?.root_id as string | undefined) || currentRootIdRef.current;
-    if (selectedKey === sessionKey && selectedRoot === rootID) {
+      fileOpenRequestRef.current += 1;
       setSelectedSession(null);
+      setFile(null);
+      setGitDiff(null);
       replaceURLState({
         root: rootID,
-        file: fileRef.current?.root === rootID ? fileRef.current.path : "",
+        file: "",
         session: "",
-        cursor: fileCursorRef.current || 0,
-        pluginQuery: fileRef.current?.root === rootID ? pluginQuery : {},
+        cursor: 0,
+        pluginQuery: {},
       });
-    }
+      try {
+        const next = await fetchGitDiff(rootID, item.path, {
+          cacheSignature: buildGitDiffCacheSignature(item),
+        });
+        setGitDiff(next);
+        if (currentRootIdRef.current !== rootID) {
+          setCurrentRootId(rootID);
+        }
+        if (isMobile) {
+          setIsLeftOpen(false);
+        }
+      } catch (err) {
+        console.error("[git.diff] failed", { rootID, path: item.path, err });
+      }
+    },
+    [isMobile, replaceURLState],
+  );
 
-    bumpCacheVersion();
-  }, [bumpCacheVersion, pluginQuery, replaceURLState, rootSessionKey, setBoundSessionForRoot, setDrawerOpenForRoot, setDrawerSessionForRoot]);
+  const handleTreeUpload = useCallback(
+    async (files: File[]) => {
+      const rootID = currentRootIdRef.current;
+      if (!rootID || files.length === 0) return;
+
+      const selectedDirPath =
+        selectedDirRef.current === rootID ? "." : selectedDirRef.current;
+      const targetDir =
+        selectedDirPath ||
+        (fileRef.current?.path ? dirnameOfPath(fileRef.current.path) : ".");
+      try {
+        const uploaded = await uploadFiles({
+          rootId: rootID,
+          dir: targetDir,
+          files,
+        });
+        uploaded.forEach((item) => {
+          if (typeof item?.path === "string" && item.path) {
+            invalidateFileCache(rootID, item.path);
+          }
+        });
+        const currentDir =
+          (selectedDirRef.current === rootID ? "." : selectedDirRef.current) ||
+          ".";
+        const syncMain =
+          rootID === currentRootIdRef.current && currentDir === targetDir;
+        await refreshTreeDir(rootID, targetDir, syncMain);
+        setExpanded((prev) =>
+          Array.from(
+            new Set([
+              ...prev,
+              rootID,
+              targetDir === "." ? rootID : `${rootID}:${targetDir}`,
+            ]),
+          ),
+        );
+      } catch (err) {
+        reportError(
+          "file.write_failed",
+          String((err as Error)?.message || "上传文件失败"),
+        );
+      }
+    },
+    [refreshTreeDir],
+  );
+
+  const handleSelectSession = useCallback(
+    async (session: any) => {
+      const key = session?.key || session?.session_key;
+      const targetRoot =
+        (session?.root_id as string | undefined) || currentRootIdRef.current;
+      if (!targetRoot || !key) return;
+      const currentDrawer = drawerSessionByRootRef.current[targetRoot];
+      const preservePending =
+        currentDrawer?.key === key
+          ? !!(currentDrawer as any)?.pending
+          : !!(session as any)?.pending;
+      replaceURLState({
+        root: targetRoot,
+        file: "",
+        session: key,
+        cursor: 0,
+        pluginQuery: {},
+      });
+      setSelectedSession({
+        ...(session as any),
+        pending: preservePending,
+      } as SessionItem);
+      setInteractionMode("main");
+      setDrawerOpenForRoot(targetRoot, false);
+      if (isMobile) setIsRightOpen(false);
+      const cacheKey = rootSessionKey(targetRoot, key);
+      const applySession = (fullSession: Session) => {
+        const normalized = { ...(fullSession as any), key } as Session;
+        sessionCacheRef.current[cacheKey] = normalized;
+        setSelectedSession((prev) => {
+          const prevKey = prev?.key || prev?.session_key;
+          const prevRoot =
+            (prev?.root_id as string | undefined) || currentRootIdRef.current;
+          if (prevKey !== key || prevRoot !== targetRoot) {
+            return prev;
+          }
+          return {
+            ...(prev as any),
+            ...(normalized as any),
+            pending:
+              typeof (prev as any)?.pending === "boolean"
+                ? !!(prev as any).pending
+                : preservePending,
+            key,
+            session_key: key,
+            root_id: targetRoot,
+          } as SessionItem;
+        });
+        if ((boundSessionByRootRef.current[targetRoot] || null) === key) {
+          const activeDrawer = drawerSessionByRootRef.current[targetRoot];
+          setDrawerSessionForRoot(targetRoot, {
+            ...(normalized as any),
+            pending:
+              activeDrawer?.key === key
+                ? !!(activeDrawer as any)?.pending
+                : preservePending,
+          } as Session);
+        }
+        bumpCacheVersion();
+      };
+      const cached = sessionCacheRef.current[cacheKey];
+      if (cached) {
+        applySession(cached);
+        if (hasSessionExchanges(cached)) {
+          loadedSessionRef.current[cacheKey] = true;
+          return;
+        }
+      } else {
+        const persisted = await getCachedSession(targetRoot, key);
+        if (persisted) {
+          applySession(persisted);
+        }
+      }
+      if (loadedSessionRef.current[cacheKey]) {
+        return;
+      }
+      try {
+        const inflight = loadingSessionRef.current[cacheKey];
+        if (inflight) {
+          const fullSession = await inflight;
+          if (fullSession) applySession(fullSession);
+          return;
+        }
+        const request = syncSession(targetRoot, key).finally(() => {
+          delete loadingSessionRef.current[cacheKey];
+        });
+        loadingSessionRef.current[cacheKey] = request;
+        const syncResult = await request;
+        const fullSession = syncResult.session;
+        if (fullSession) {
+          applySession(fullSession as Session);
+          loadedSessionRef.current[cacheKey] = true;
+          void sessionService.markSessionReady(targetRoot, key);
+        }
+      } catch (err) {}
+    },
+    [
+      isMobile,
+      rootSessionKey,
+      bumpCacheVersion,
+      setDrawerOpenForRoot,
+      setDrawerSessionForRoot,
+      replaceURLState,
+    ],
+  );
+
+  const handleDeleteSession = useCallback(
+    async (session: SessionItem) => {
+      const sessionKey = session?.key || session?.session_key;
+      const rootID =
+        (session?.root_id as string | undefined) || currentRootIdRef.current;
+      if (!rootID || !sessionKey) return;
+
+      const deleted = await sessionService.deleteSession(rootID, sessionKey);
+      if (!deleted) {
+        reportError("session.delete_failed", "删除会话失败");
+        return;
+      }
+
+      setSessions((prev) =>
+        prev.filter((item) => (item.key || item.session_key) !== sessionKey),
+      );
+
+      const cacheKey = rootSessionKey(rootID, sessionKey);
+      delete sessionCacheRef.current[cacheKey];
+      delete loadedSessionRef.current[cacheKey];
+      delete loadingSessionRef.current[cacheKey];
+      delete pendingBySessionRef.current[cacheKey];
+      delete cancelRequestedBySessionRef.current[cacheKey];
+      void deleteCachedSession(rootID, sessionKey);
+
+      if (boundSessionByRootRef.current[rootID] === sessionKey) {
+        setBoundSessionForRoot(rootID, null);
+      }
+      if (drawerSessionByRootRef.current[rootID]?.key === sessionKey) {
+        setDrawerSessionForRoot(rootID, null);
+        setDrawerOpenForRoot(rootID, false);
+      }
+
+      const selectedKey =
+        selectedSessionRef.current?.key ||
+        selectedSessionRef.current?.session_key;
+      const selectedRoot =
+        (selectedSessionRef.current?.root_id as string | undefined) ||
+        currentRootIdRef.current;
+      if (selectedKey === sessionKey && selectedRoot === rootID) {
+        setSelectedSession(null);
+        replaceURLState({
+          root: rootID,
+          file: fileRef.current?.root === rootID ? fileRef.current.path : "",
+          session: "",
+          cursor: fileCursorRef.current || 0,
+          pluginQuery: fileRef.current?.root === rootID ? pluginQuery : {},
+        });
+      }
+
+      bumpCacheVersion();
+    },
+    [
+      bumpCacheVersion,
+      pluginQuery,
+      replaceURLState,
+      rootSessionKey,
+      setBoundSessionForRoot,
+      setDrawerOpenForRoot,
+      setDrawerSessionForRoot,
+    ],
+  );
 
   useEffect(() => {
     handleSelectSessionRef.current = handleSelectSession;
   }, [handleSelectSession]);
 
-  const handleSendMessage = useCallback(async (message: string, mode: SessionMode, agent: string, model?: string) => {
-    const activeRoot = currentRootIdRef.current;
-    if (!activeRoot) return;
-    if (Object.values(pendingRequestRef.current).some((pending) => pending.rootId === activeRoot)) {
+  const loadExternalSessions = useCallback(
+    async (
+      rootID: string,
+      agent: string,
+      options?: { beforeTime?: string; afterTime?: string; replace?: boolean },
+    ) => {
+      if (!rootID || !agent) {
+        setExternalSessions([]);
+        setHasMoreExternalSessions(false);
+        return;
+      }
+      try {
+        if (!options?.beforeTime) {
+          setLoadingExternalSessions(true);
+        }
+        const next = (await sessionService.fetchExternalSessions(
+          rootID,
+          agent,
+          {
+            beforeTime: options?.beforeTime,
+            afterTime: options?.afterTime,
+            filterBound: externalFilterBound,
+            limit: 50,
+          },
+        )) as SessionItem[];
+        setHasMoreExternalSessions(next.length >= 50);
+        if (options?.replace || (!options?.beforeTime && !options?.afterTime)) {
+          setExternalSessions(next);
+          return;
+        }
+        setExternalSessions((prev) => mergeSessionItems(prev, next));
+      } finally {
+        setLoadingExternalSessions(false);
+      }
+    },
+    [externalFilterBound, mergeSessionItems],
+  );
+
+  const exitImportMode = useCallback(() => {
+    setSessionListMode("local");
+    setExternalSelectedKey("");
+    setImportMenuOpen(false);
+  }, []);
+
+  const enterImportMode = useCallback(
+    async (agentName: string) => {
+      const rootID = currentRootIdRef.current || "";
+      const trimmedAgent = String(agentName || "").trim();
+      if (!rootID || !trimmedAgent) {
+        return;
+      }
+      setExternalImportAgent(trimmedAgent);
+      setExternalSelectedKey("");
+      setSessionListMode("import");
+      await loadExternalSessions(rootID, trimmedAgent, { replace: true });
+    },
+    [loadExternalSessions],
+  );
+
+  const handleLoadOlderExternalSessions = useCallback(async () => {
+    const rootID = currentRootIdRef.current || "";
+    const oldest =
+      externalSessionsRef.current[externalSessionsRef.current.length - 1]
+        ?.updated_at || "";
+    if (
+      !rootID ||
+      !externalImportAgent ||
+      !oldest ||
+      loadingOlderExternalSessions
+    ) {
       return;
     }
-    const selected = selectedSessionRef.current;
-    const selectedKey = selected?.key || selected?.session_key;
-    const isMainSessionView =
-      interactionModeRef.current !== "drawer" &&
-      !!selectedKey &&
-      (((selected as any)?.root_id as string | undefined) || activeRoot) === activeRoot;
-    let sendSessionKey = isMainSessionView && selectedKey && !selectedKey.startsWith("pending-")
-      ? selectedKey
-      : activeBoundSessionKey;
-    let session: Session | null = null;
-    if (sendSessionKey) {
-      session = sessionCacheRef.current[rootSessionKey(activeRoot, sendSessionKey)];
-      if (!session) {
-        const current = currentSessionRef.current;
-        if (current?.key === sendSessionKey) {
-          session = current as Session;
+    setLoadingOlderExternalSessions(true);
+    try {
+      await loadExternalSessions(rootID, externalImportAgent, {
+        beforeTime: oldest,
+      });
+    } finally {
+      setLoadingOlderExternalSessions(false);
+    }
+  }, [externalImportAgent, loadExternalSessions, loadingOlderExternalSessions]);
+
+  const handleImportExternalSession = useCallback(
+    async (session: SessionItem) => {
+      const rootID = currentRootIdRef.current || "";
+      const sessionKey = String(
+        (session as any)?.agent_session_id || session?.key || "",
+      ).trim();
+      if (
+        !rootID ||
+        !externalImportAgent ||
+        !sessionKey ||
+        importingExternalSessionKey
+      ) {
+        return;
+      }
+      setImportingExternalSessionKey(sessionKey);
+      try {
+        const imported = await sessionService.importExternalSession(
+          rootID,
+          externalImportAgent,
+          sessionKey,
+        );
+        if (!imported?.session_key) {
+          reportError("session.import_failed", "导入会话失败");
+          return;
+        }
+        exitImportMode();
+        const next = (await sessionService.fetchSessions(
+          rootID,
+          {},
+        )) as SessionItem[];
+        setHasMoreSessions(next.length >= 50);
+        setSessions(next);
+        await handleSelectSession({
+          key: imported.session_key,
+          root_id: rootID,
+          type: "chat",
+          agent: externalImportAgent,
+          name: session.name,
+        } as SessionItem);
+        if (isMobile) {
+          setIsRightOpen(false);
+        }
+      } finally {
+        setImportingExternalSessionKey("");
+      }
+    },
+    [
+      exitImportMode,
+      externalImportAgent,
+      handleSelectSession,
+      importingExternalSessionKey,
+      isMobile,
+    ],
+  );
+
+  const handleSendMessage = useCallback(
+    async (
+      message: string,
+      mode: SessionMode,
+      agent: string,
+      model?: string,
+    ) => {
+      const activeRoot = currentRootIdRef.current;
+      if (!activeRoot) return;
+      if (
+        Object.values(pendingRequestRef.current).some(
+          (pending) => pending.rootId === activeRoot,
+        )
+      ) {
+        return;
+      }
+      const selected = selectedSessionRef.current;
+      const selectedKey = selected?.key || selected?.session_key;
+      const isMainSessionView =
+        interactionModeRef.current !== "drawer" &&
+        !!selectedKey &&
+        (((selected as any)?.root_id as string | undefined) || activeRoot) ===
+          activeRoot;
+      let sendSessionKey =
+        isMainSessionView && selectedKey && !selectedKey.startsWith("pending-")
+          ? selectedKey
+          : activeBoundSessionKey;
+      let session: Session | null = null;
+      if (sendSessionKey) {
+        session =
+          sessionCacheRef.current[rootSessionKey(activeRoot, sendSessionKey)];
+        if (!session) {
+          const current = currentSessionRef.current;
+          if (current?.key === sendSessionKey) {
+            session = current as Session;
+          }
+        }
+        if (!session && selectedKey === sendSessionKey) {
+          session = { ...(selected as any), key: sendSessionKey } as Session;
+        }
+      } else {
+        if (selectedKey && !selectedKey.startsWith("pending-")) {
+          sendSessionKey = selectedKey;
+          session =
+            sessionCacheRef.current[
+              rootSessionKey(activeRoot, sendSessionKey)
+            ] || ({ ...selected, key: selectedKey } as Session);
         }
       }
-      if (!session && selectedKey === sendSessionKey) {
-        session = ({ ...(selected as any), key: sendSessionKey } as Session);
+      let effectiveMode = mode,
+        effectiveAgent = agent,
+        effectiveModel = model || "";
+      if (sendSessionKey && session) {
+        const previousAgent = session.agent || "";
+        effectiveMode = normalizeMode(session.type as any);
+        effectiveAgent = agent || previousAgent || "";
+        effectiveModel =
+          model ||
+          (effectiveAgent === previousAgent ? session.model || "" : "");
+        updateSessionAgentForKey(
+          activeRoot,
+          sendSessionKey,
+          effectiveAgent,
+          effectiveModel,
+        );
+        session = {
+          ...(session as any),
+          agent: effectiveAgent,
+          model: effectiveModel,
+        } as Session;
+        setBoundSessionForRoot(activeRoot, sendSessionKey);
+        setSelectedPendingByKey(sendSessionKey, true);
+        setDrawerSessionForRoot(activeRoot, {
+          ...(session as any),
+          pending: true,
+        } as Session);
+      } else {
+        sendSessionKey = undefined;
+        const tempKey = `pending-${Date.now()}`;
+        session = {
+          key: tempKey,
+          type: mode,
+          agent,
+          model: effectiveModel,
+          name: "新会话",
+          pending: true,
+        } as any;
       }
-    } else {
-      if (selectedKey && !selectedKey.startsWith("pending-")) {
-        sendSessionKey = selectedKey;
-        session = sessionCacheRef.current[rootSessionKey(activeRoot, sendSessionKey)] || ({ ...selected, key: selectedKey } as Session);
-      }
-    }
-    let effectiveMode = mode, effectiveAgent = agent, effectiveModel = model || "";
-    if (sendSessionKey && session) {
-      const previousAgent = session.agent || "";
-      effectiveMode = normalizeMode(session.type as any);
-      effectiveAgent = agent || previousAgent || "";
-      effectiveModel = model || (effectiveAgent === previousAgent ? session.model || "" : "");
-      updateSessionAgentForKey(activeRoot, sendSessionKey, effectiveAgent, effectiveModel);
-      session = {
-        ...(session as any),
+      const now = new Date().toISOString();
+      const requestId = sessionService.createRequestId("msg");
+      const tempKey = sendSessionKey ? "" : session?.key || "";
+      const userEx: Exchange = {
+        role: "user",
+        content: message,
+        timestamp: now,
+        pending_ack: true,
+      };
+      pendingRequestRef.current[requestId] = {
+        rootId: activeRoot,
+        mode: effectiveMode,
         agent: effectiveAgent,
         model: effectiveModel,
-      } as Session;
-      setBoundSessionForRoot(activeRoot, sendSessionKey);
-      setSelectedPendingByKey(sendSessionKey, true);
-      setDrawerSessionForRoot(activeRoot, { ...(session as any), pending: true } as Session);
-    } else {
-      sendSessionKey = undefined;
-      const tempKey = `pending-${Date.now()}`;
-      session = { key: tempKey, type: mode, agent, model: effectiveModel, name: "新会话", pending: true } as any;
-    }
-    const now = new Date().toISOString();
-    const requestId = sessionService.createRequestId("msg");
-    const tempKey = sendSessionKey ? "" : (session?.key || "");
-    const userEx: Exchange = { role: "user", content: message, timestamp: now, pending_ack: true };
-    pendingRequestRef.current[requestId] = { rootId: activeRoot, mode: effectiveMode, agent: effectiveAgent, model: effectiveModel, message, timestamp: now, requestId, sessionKey: sendSessionKey, tempKey };
-    if (sendSessionKey) {
-      const ck = rootSessionKey(activeRoot, sendSessionKey);
-      const cached = sessionCacheRef.current[ck] || ({ ...(session as any) } as Session);
-      const prevExchanges = Array.isArray((cached as any).exchanges) ? ((cached as any).exchanges as Exchange[]) : [];
-      sessionCacheRef.current[ck] = {
-        ...(cached as any),
-        exchanges: [...prevExchanges, userEx],
-        updated_at: now,
-      } as Session;
-      session = sessionCacheRef.current[ck];
-      bumpCacheVersion();
-    } else {
-      pendingDraftRef.current = { rootId: activeRoot, mode: effectiveMode, agent: effectiveAgent, model: effectiveModel, message, timestamp: now, requestId, tempKey };
-      session = {
-        ...(session as any),
-        exchanges: [userEx],
-        updated_at: now,
-      } as Session;
-    }
-    const isBoundInMain = !!selectedSessionRef.current && selectedSessionRef.current.key === sendSessionKey && interactionModeRef.current !== "drawer";
-    if (!isBoundInMain) { setInteractionMode("drawer"); setDrawerOpenForRoot(activeRoot, true); }
-    setDrawerSessionForRoot(activeRoot, { ...(session as any), pending: true } as Session);
-    const explicitFileContext = hasExplicitFileContext(message);
-    const selection = explicitFileContext || !attachedFileContext?.filePath
-      ? undefined
-      : {
-          filePath: attachedFileContext.filePath,
-          startLine: attachedFileContext.startLine,
-          endLine: attachedFileContext.endLine,
-          text: attachedFileContext.text,
+        message,
+        timestamp: now,
+        requestId,
+        sessionKey: sendSessionKey,
+        tempKey,
+      };
+      if (sendSessionKey) {
+        const ck = rootSessionKey(activeRoot, sendSessionKey);
+        const cached =
+          sessionCacheRef.current[ck] || ({ ...(session as any) } as Session);
+        const prevExchanges = Array.isArray((cached as any).exchanges)
+          ? ((cached as any).exchanges as Exchange[])
+          : [];
+        sessionCacheRef.current[ck] = {
+          ...(cached as any),
+          exchanges: [...prevExchanges, userEx],
+          updated_at: now,
+        } as Session;
+        session = sessionCacheRef.current[ck];
+        bumpCacheVersion();
+      } else {
+        pendingDraftRef.current = {
+          rootId: activeRoot,
+          mode: effectiveMode,
+          agent: effectiveAgent,
+          model: effectiveModel,
+          message,
+          timestamp: now,
+          requestId,
+          tempKey,
         };
-    const context = buildClientContext({
-      currentRoot: activeRoot,
-      selection,
-      pluginCatalog: effectiveMode === "plugin" ? getViewModeSystemPrompt() : undefined,
-    });
-    const sent = await sessionService.sendMessage(activeRoot, sendSessionKey, message, effectiveMode, effectiveAgent, effectiveModel || undefined, context, requestId);
-    if (!sent) {
-      delete pendingRequestRef.current[requestId];
-    }
-    if (!sent && sendSessionKey) {
-      setSelectedPendingByKey(sendSessionKey, false);
-      const latest = drawerSessionByRootRef.current[activeRoot];
-      if (latest && latest.key === sendSessionKey) {
-        setDrawerSessionForRoot(activeRoot, { ...(latest as any), pending: false } as Session);
+        session = {
+          ...(session as any),
+          exchanges: [userEx],
+          updated_at: now,
+        } as Session;
       }
-    }
-  }, [activeBoundSessionKey, attachedFileContext, rootSessionKey, setSelectedPendingByKey, bumpCacheVersion, setBoundSessionForRoot, setDrawerOpenForRoot, setDrawerSessionForRoot, updateSessionAgentForKey]);
+      const isBoundInMain =
+        !!selectedSessionRef.current &&
+        selectedSessionRef.current.key === sendSessionKey &&
+        interactionModeRef.current !== "drawer";
+      if (!isBoundInMain) {
+        setInteractionMode("drawer");
+        setDrawerOpenForRoot(activeRoot, true);
+      }
+      setDrawerSessionForRoot(activeRoot, {
+        ...(session as any),
+        pending: true,
+      } as Session);
+      const explicitFileContext = hasExplicitFileContext(message);
+      const selection =
+        explicitFileContext || !attachedFileContext?.filePath
+          ? undefined
+          : {
+              filePath: attachedFileContext.filePath,
+              startLine: attachedFileContext.startLine,
+              endLine: attachedFileContext.endLine,
+              text: attachedFileContext.text,
+            };
+      const context = buildClientContext({
+        currentRoot: activeRoot,
+        selection,
+        pluginCatalog:
+          effectiveMode === "plugin" ? getViewModeSystemPrompt() : undefined,
+      });
+      const sent = await sessionService.sendMessage(
+        activeRoot,
+        sendSessionKey,
+        message,
+        effectiveMode,
+        effectiveAgent,
+        effectiveModel || undefined,
+        context,
+        requestId,
+      );
+      if (!sent) {
+        delete pendingRequestRef.current[requestId];
+      }
+      if (!sent && sendSessionKey) {
+        setSelectedPendingByKey(sendSessionKey, false);
+        const latest = drawerSessionByRootRef.current[activeRoot];
+        if (latest && latest.key === sendSessionKey) {
+          setDrawerSessionForRoot(activeRoot, {
+            ...(latest as any),
+            pending: false,
+          } as Session);
+        }
+      }
+    },
+    [
+      activeBoundSessionKey,
+      attachedFileContext,
+      rootSessionKey,
+      setSelectedPendingByKey,
+      bumpCacheVersion,
+      setBoundSessionForRoot,
+      setDrawerOpenForRoot,
+      setDrawerSessionForRoot,
+      updateSessionAgentForKey,
+    ],
+  );
 
-  const handleCancelCurrentTurn = useCallback(async (sessionKey: string) => {
-    const activeRoot = currentRootIdRef.current;
-    if (!activeRoot || !sessionKey) return;
-    const cacheKey = rootSessionKey(activeRoot, sessionKey);
-    cancelRequestedBySessionRef.current[cacheKey] = true;
-    const sent = await sessionService.cancelMessage(activeRoot, sessionKey);
-    if (!sent) {
-      delete cancelRequestedBySessionRef.current[cacheKey];
-    }
-  }, [rootSessionKey]);
+  const handleCancelCurrentTurn = useCallback(
+    async (sessionKey: string) => {
+      const activeRoot = currentRootIdRef.current;
+      if (!activeRoot || !sessionKey) return;
+      const cacheKey = rootSessionKey(activeRoot, sessionKey);
+      cancelRequestedBySessionRef.current[cacheKey] = true;
+      const sent = await sessionService.cancelMessage(activeRoot, sessionKey);
+      if (!sent) {
+        delete cancelRequestedBySessionRef.current[cacheKey];
+      }
+    },
+    [rootSessionKey],
+  );
 
   const handleNewSession = useCallback(() => {
     const rootID = currentRootIdRef.current;
     setSelectedSession(null);
     setBoundSessionForRoot(rootID, null);
     setDrawerSessionForRoot(rootID, null);
-    setInteractionMode("main"); setDrawerOpenForRoot(rootID, false);
+    setInteractionMode("main");
+    setDrawerOpenForRoot(rootID, false);
   }, [setBoundSessionForRoot, setDrawerOpenForRoot, setDrawerSessionForRoot]);
 
   const currentSelectionSource = useMemo(() => {
@@ -1481,32 +2224,42 @@ export function App() {
     return null;
   }, [file, gitDiff]);
 
-  const buildAttachedFileContext = useCallback((currentSource: { path: string; name: string } | null, selection: ViewerSelection | null): AttachedFileContext | null => {
-    if (!currentSource?.path) {
-      return null;
-    }
-    const matchesCurrentFile = selection?.filePath === currentSource.path;
-    return {
-      filePath: currentSource.path,
-      fileName: currentSource.name,
-      startLine: matchesCurrentFile ? selection?.startLine : undefined,
-      endLine: matchesCurrentFile ? selection?.endLine : undefined,
-      text: matchesCurrentFile ? selection?.text : undefined,
-    };
-  }, []);
+  const buildAttachedFileContext = useCallback(
+    (
+      currentSource: { path: string; name: string } | null,
+      selection: ViewerSelection | null,
+    ): AttachedFileContext | null => {
+      if (!currentSource?.path) {
+        return null;
+      }
+      const matchesCurrentFile = selection?.filePath === currentSource.path;
+      return {
+        filePath: currentSource.path,
+        fileName: currentSource.name,
+        startLine: matchesCurrentFile ? selection?.startLine : undefined,
+        endLine: matchesCurrentFile ? selection?.endLine : undefined,
+        text: matchesCurrentFile ? selection?.text : undefined,
+      };
+    },
+    [],
+  );
 
   const handleRequestFileContext = useCallback(() => {
     const currentSource = currentSelectionSource;
-    if (dismissedSelectionFileRef.current && dismissedSelectionFileRef.current === currentSource?.path) {
+    if (
+      dismissedSelectionFileRef.current &&
+      dismissedSelectionFileRef.current === currentSource?.path
+    ) {
       return;
     }
     const liveSelection = viewerSelectionRef.current;
     const fallbackSelection = lastViewerSelectionRef.current;
-    const nextSelection = liveSelection?.filePath === currentSource?.path
-      ? liveSelection
-      : fallbackSelection?.filePath === currentSource?.path
-      ? fallbackSelection
-      : null;
+    const nextSelection =
+      liveSelection?.filePath === currentSource?.path
+        ? liveSelection
+        : fallbackSelection?.filePath === currentSource?.path
+          ? fallbackSelection
+          : null;
     const next = buildAttachedFileContext(currentSource, nextSelection);
     setAttachedFileContext(next);
   }, [buildAttachedFileContext, currentSelectionSource]);
@@ -1517,13 +2270,16 @@ export function App() {
     setAttachedFileContext(null);
   }, [currentSelectionSource]);
 
-  const handleViewerSelectionChange = useCallback((next: ViewerSelection | null) => {
-    setViewerSelection(next);
-    if (next?.filePath) {
-      dismissedSelectionFileRef.current = null;
-      lastViewerSelectionRef.current = next;
-    }
-  }, []);
+  const handleViewerSelectionChange = useCallback(
+    (next: ViewerSelection | null) => {
+      setViewerSelection(next);
+      if (next?.filePath) {
+        dismissedSelectionFileRef.current = null;
+        lastViewerSelectionRef.current = next;
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     const currentPath = currentSelectionSource?.path;
@@ -1534,13 +2290,18 @@ export function App() {
       setAttachedFileContext(null);
       return;
     }
-    if (dismissedSelectionFileRef.current && dismissedSelectionFileRef.current !== currentPath) {
+    if (
+      dismissedSelectionFileRef.current &&
+      dismissedSelectionFileRef.current !== currentPath
+    ) {
       dismissedSelectionFileRef.current = null;
     }
     if (lastViewerSelectionRef.current?.filePath !== currentPath) {
       lastViewerSelectionRef.current = null;
     }
-    setViewerSelection((prev) => (prev?.filePath === currentPath ? prev : null));
+    setViewerSelection((prev) =>
+      prev?.filePath === currentPath ? prev : null,
+    );
     setAttachedFileContext((prev) => {
       if (!prev) {
         return prev;
@@ -1567,7 +2328,10 @@ export function App() {
 
   const rememberCurrentFileScroll = useCallback(() => {
     const currentFile = fileRef.current;
-    const key = buildFileScrollKey(currentFile?.root || currentRootIdRef.current, currentFile?.path);
+    const key = buildFileScrollKey(
+      currentFile?.root || currentRootIdRef.current,
+      currentFile?.path,
+    );
     if (!key) return;
     if (!(key in fileScrollPositionsRef.current)) {
       fileScrollPositionsRef.current[key] = 0;
@@ -1575,221 +2339,320 @@ export function App() {
     }
   }, []);
 
-  const actionHandlers = useMemo(() => ({
-    open: async (params: any) => {
-      const requestId = ++fileOpenRequestRef.current;
-      const isStale = () => fileOpenRequestRef.current !== requestId;
-      const parsedLocation = parseFileLocation(String(params.path || ""));
-      const root = params.root || currentRootIdRef.current;
-      const rootInfo = root ? managedRootByIdRef.current[String(root)] : undefined;
-      const path = normalizePathForRoot(parsedLocation.path, rootInfo?.root_path);
-      if (!path || !root) return;
-      rememberCurrentFileScroll();
-      setGitDiff(null);
-      const currentFilePath = fileRef.current?.path || "";
-      const currentFileRoot = fileRef.current?.root || currentRootIdRef.current || "";
-      const isFileSwitch = currentFilePath !== String(path) || currentFileRoot !== String(root);
-      if (isFileSwitch) {
-        pluginBypassRef.current = false;
-        setPluginBypass(false);
-        // Only tear down the current file view when switching to a different file/root.
-        // Reopening the same file (for example from session view back to file view) should
-        // preserve the existing scroll position and DOM state until fresh content arrives.
-        setFile(null);
-      }
-      if (currentRootIdRef.current !== root) {
-        setCurrentRootId(root);
-      }
-      const requestedCursor = normalizeCursor(params.cursor);
-      const cursor = requestedCursor === null ? 0 : requestedCursor;
-      const preserveQuery = !!params.preservePluginQuery;
-      const persistedQuery = loadPersistedPluginQuery(String(root), String(path));
-      const urlQuery = preserveQuery ? parsePluginQuery(window.location.search) : {};
-      // Priority: URL query > localStorage persisted query.
-      const nextPluginQuery = preserveQuery ? { ...persistedQuery, ...urlQuery } : persistedQuery;
-      setPluginQuery(nextPluginQuery);
-      replaceURLState({ root, file: path, session: "", cursor, pluginQuery: nextPluginQuery });
-      persistPluginQuery(String(root), String(path), nextPluginQuery);
-
-      const expandAndLoadTreeForFile = async () => {
-        const dirs = parentDirsOfFile(String(path));
-        setExpanded((prev) => {
-          const next = new Set(prev);
-          next.add(String(root));
-          dirs.forEach((dir) => next.add(`${root}:${dir}`));
-          return Array.from(next);
-        });
-        const toLoad = [".", ...dirs];
-        for (const dir of toLoad) {
-          const cacheKey = treeCacheKey(String(root), dir);
-          if (Object.prototype.hasOwnProperty.call(entriesByPathRef.current, cacheKey) && !invalidTreeCacheKeysRef.current.has(cacheKey)) {
-            continue;
-          }
-          try {
-            const res = await fetch(appURL("/api/tree", new URLSearchParams({ root: String(root), dir })));
-            if (!res.ok) continue;
-            const payload = await res.json();
-            const parsed = normalizeTreeResponse(payload);
-            invalidTreeCacheKeysRef.current.delete(cacheKey);
-            setEntriesByPath((prev) => ({ ...prev, [cacheKey]: parsed.entries }));
-          } catch {
-          }
+  const actionHandlers = useMemo(
+    () => ({
+      open: async (params: any) => {
+        const requestId = ++fileOpenRequestRef.current;
+        const isStale = () => fileOpenRequestRef.current !== requestId;
+        const parsedLocation = parseFileLocation(String(params.path || ""));
+        const root = params.root || currentRootIdRef.current;
+        const rootInfo = root
+          ? managedRootByIdRef.current[String(root)]
+          : undefined;
+        const path = normalizePathForRoot(
+          parsedLocation.path,
+          rootInfo?.root_path,
+        );
+        if (!path || !root) return;
+        rememberCurrentFileScroll();
+        setGitDiff(null);
+        const currentFilePath = fileRef.current?.path || "";
+        const currentFileRoot =
+          fileRef.current?.root || currentRootIdRef.current || "";
+        const isFileSwitch =
+          currentFilePath !== String(path) || currentFileRoot !== String(root);
+        if (isFileSwitch) {
+          pluginBypassRef.current = false;
+          setPluginBypass(false);
+          // Only tear down the current file view when switching to a different file/root.
+          // Reopening the same file (for example from session view back to file view) should
+          // preserve the existing scroll position and DOM state until fresh content arrives.
+          setFile(null);
         }
-      };
-
-      void expandAndLoadTreeForFile();
-      try {
-        const fetchFileWithMode = async (mode: "full" | "incremental", timeoutMs?: number) =>
-          fetchFile({
-            rootId: String(root),
-            path: String(path),
-            readMode: mode,
-            cursor,
-            timeoutMs,
-          });
-
-        let readMode: "incremental" | "full" = params.readMode === "full" ? "full" : "incremental";
-        let requiresFull = params.readMode === "full";
-        if (params.readMode !== "full" && params.readMode !== "incremental") {
-          const currentFilePath = fileRef.current?.path || "";
-          const currentFileRoot = (fileRef.current?.root || currentRootIdRef.current || "");
-          const targetPath = String(path);
-          const targetRoot = String(root);
-          const sameFileReload =
-            pluginBypassRef.current &&
-            currentFilePath === targetPath &&
-            currentFileRoot === targetRoot;
-
-          if (sameFileReload) {
-            readMode = "incremental";
-          } else {
-          try {
-            const plugin = pluginManagerRef.current.match(root, buildMatchInputFromPath(path, nextPluginQuery));
-            readMode = inferReadModeFromPlugin(plugin);
-            requiresFull = readMode === "full";
-          } catch {
-            readMode = "incremental";
-          }
-          }
-        }
-        const cached = await getCachedFile({
-          rootId: String(root),
-          path: String(path),
-          readMode,
-          cursor,
-        });
-        if (cached && !isStale()) {
-          setFile({
-            ...cached,
-            targetLine: parsedLocation.targetLine,
-            targetColumn: parsedLocation.targetColumn,
-          });
-        }
-
-        let next: FilePayload | null;
-        try {
-          next = await fetchFileWithMode(readMode, requiresFull ? undefined : (readMode === "full" ? 1500 : undefined));
-        } catch (err) {
-          if (readMode === "full" && !requiresFull) {
-            next = await fetchFileWithMode("incremental");
-            readMode = "incremental";
-          } else {
-            throw err;
-          }
-        }
-        if (isStale()) {
-          return;
-        }
-        if (next) {
-          setFile({
-            ...next,
-            targetLine: parsedLocation.targetLine,
-            targetColumn: parsedLocation.targetColumn,
-          });
-        }
-        fileCursorRef.current = cursor;
-        setSelectedSession(null);
-        setDrawerOpenForRoot(root, false);
-        if (isMobile) setIsLeftOpen(false);
-      } catch (err) {
-        const status = extractHTTPStatusFromErrorMessage((err as Error)?.message || "");
-        if (status && handleRelayNavigationFailure(status, "")) {
-          return;
-        }
-        console.error("[file.open] failed", { root, path, cursor, err });
-      }
-    },
-    open_dir: async (params: any) => {
-      fileOpenRequestRef.current += 1;
-      const path = params.path, rootParam = params.root || currentRootIdRef.current, isToggle = !!params.toggle;
-      if (!path || !rootParam) return;
-      setGitDiff(null);
-      const isActuallyRoot = params.isRoot === true;
-      const root = isActuallyRoot ? path : rootParam;
-      const expandedKey = isActuallyRoot ? path : `${root}:${path}`;
-      const preserveQuery = !!params.preservePluginQuery;
-      const nextPluginQuery = preserveQuery ? parsePluginQuery(window.location.search) : {};
-      const loadDirectoryView = async (targetPath: string, targetIsRoot: boolean) => {
-        const apiDir = targetIsRoot ? "." : targetPath;
-        const cacheKey = treeCacheKey(root, apiDir);
         if (currentRootIdRef.current !== root) {
           setCurrentRootId(root);
         }
-        setFile(null);
-        setSelectedSession(null);
-        setMainEntries([]);
+        const requestedCursor = normalizeCursor(params.cursor);
+        const cursor = requestedCursor === null ? 0 : requestedCursor;
+        const preserveQuery = !!params.preservePluginQuery;
+        const persistedQuery = loadPersistedPluginQuery(
+          String(root),
+          String(path),
+        );
+        const urlQuery = preserveQuery
+          ? parsePluginQuery(window.location.search)
+          : {};
+        // Priority: URL query > localStorage persisted query.
+        const nextPluginQuery = preserveQuery
+          ? { ...persistedQuery, ...urlQuery }
+          : persistedQuery;
         setPluginQuery(nextPluginQuery);
-        replaceURLState({ root, file: "", session: "", cursor: 0, pluginQuery: nextPluginQuery });
-        const cachedEntries = entriesByPathRef.current[cacheKey];
-        if (Object.prototype.hasOwnProperty.call(entriesByPathRef.current, cacheKey) && !invalidTreeCacheKeysRef.current.has(cacheKey)) {
-          setMainEntries(cachedEntries || []);
-          setSelectedDir(targetPath);
-          setSelectedDirKey(buildDirectorySelectionKey(root, targetPath, targetIsRoot));
-          setFile(null);
-          setSelectedSession(null);
-          fileCursorRef.current = 0;
-          setDrawerOpenForRoot(root, false);
-          if (isMobile) setIsLeftOpen(false);
-          return;
-        }
-        try {
-          const res = await fetch(appURL("/api/tree", new URLSearchParams({ root, dir: apiDir })));
-          if (!res.ok) {
-            const payload = await res.json().catch(() => ({}));
-            if (handleRelayNavigationFailure(res.status, typeof payload?.error === "string" ? payload.error : "")) {
-              return;
+        replaceURLState({
+          root,
+          file: path,
+          session: "",
+          cursor,
+          pluginQuery: nextPluginQuery,
+        });
+        persistPluginQuery(String(root), String(path), nextPluginQuery);
+
+        const expandAndLoadTreeForFile = async () => {
+          const dirs = parentDirsOfFile(String(path));
+          setExpanded((prev) => {
+            const next = new Set(prev);
+            next.add(String(root));
+            dirs.forEach((dir) => next.add(`${root}:${dir}`));
+            return Array.from(next);
+          });
+          const toLoad = [".", ...dirs];
+          for (const dir of toLoad) {
+            const cacheKey = treeCacheKey(String(root), dir);
+            if (
+              Object.prototype.hasOwnProperty.call(
+                entriesByPathRef.current,
+                cacheKey,
+              ) &&
+              !invalidTreeCacheKeysRef.current.has(cacheKey)
+            ) {
+              continue;
             }
+            try {
+              const res = await fetch(
+                appURL(
+                  "/api/tree",
+                  new URLSearchParams({ root: String(root), dir }),
+                ),
+              );
+              if (!res.ok) continue;
+              const payload = await res.json();
+              const parsed = normalizeTreeResponse(payload);
+              invalidTreeCacheKeysRef.current.delete(cacheKey);
+              setEntriesByPath((prev) => ({
+                ...prev,
+                [cacheKey]: parsed.entries,
+              }));
+            } catch {}
+          }
+        };
+
+        void expandAndLoadTreeForFile();
+        try {
+          const fetchFileWithMode = async (
+            mode: "full" | "incremental",
+            timeoutMs?: number,
+          ) =>
+            fetchFile({
+              rootId: String(root),
+              path: String(path),
+              readMode: mode,
+              cursor,
+              timeoutMs,
+            });
+
+          let readMode: "incremental" | "full" =
+            params.readMode === "full" ? "full" : "incremental";
+          let requiresFull = params.readMode === "full";
+          if (params.readMode !== "full" && params.readMode !== "incremental") {
+            const currentFilePath = fileRef.current?.path || "";
+            const currentFileRoot =
+              fileRef.current?.root || currentRootIdRef.current || "";
+            const targetPath = String(path);
+            const targetRoot = String(root);
+            const sameFileReload =
+              pluginBypassRef.current &&
+              currentFilePath === targetPath &&
+              currentFileRoot === targetRoot;
+
+            if (sameFileReload) {
+              readMode = "incremental";
+            } else {
+              try {
+                const plugin = pluginManagerRef.current.match(
+                  root,
+                  buildMatchInputFromPath(path, nextPluginQuery),
+                );
+                readMode = inferReadModeFromPlugin(plugin);
+                requiresFull = readMode === "full";
+              } catch {
+                readMode = "incremental";
+              }
+            }
+          }
+          const cached = await getCachedFile({
+            rootId: String(root),
+            path: String(path),
+            readMode,
+            cursor,
+          });
+          if (cached && !isStale()) {
+            setFile({
+              ...cached,
+              targetLine: parsedLocation.targetLine,
+              targetColumn: parsedLocation.targetColumn,
+            });
+          }
+
+          let next: FilePayload | null;
+          try {
+            next = await fetchFileWithMode(
+              readMode,
+              requiresFull ? undefined : readMode === "full" ? 1500 : undefined,
+            );
+          } catch (err) {
+            if (readMode === "full" && !requiresFull) {
+              next = await fetchFileWithMode("incremental");
+              readMode = "incremental";
+            } else {
+              throw err;
+            }
+          }
+          if (isStale()) {
             return;
           }
-          const payload = await res.json();
-          const parsed = normalizeTreeResponse(payload);
-          invalidTreeCacheKeysRef.current.delete(cacheKey);
-          setEntriesByPath((prev) => ({ ...prev, [cacheKey]: parsed.entries }));
-          setMainEntries(parsed.entries);
-          setSelectedDir(targetPath);
-          setSelectedDirKey(buildDirectorySelectionKey(root, targetPath, targetIsRoot));
-          setFile(null);
+          if (next) {
+            setFile({
+              ...next,
+              targetLine: parsedLocation.targetLine,
+              targetColumn: parsedLocation.targetColumn,
+            });
+          }
+          fileCursorRef.current = cursor;
           setSelectedSession(null);
-          fileCursorRef.current = 0;
           setDrawerOpenForRoot(root, false);
           if (isMobile) setIsLeftOpen(false);
-        } catch {}
-      };
-      const isExpanded = expandedRef.current.includes(expandedKey);
-      const isCurrentExpandedRoot = isActuallyRoot && isExpanded && currentRootIdRef.current === root;
-      if (isToggle && (( !isActuallyRoot && isExpanded) || isCurrentExpandedRoot)) {
-        setExpanded((prev) => prev.filter(k => k !== expandedKey));
-        if (!isActuallyRoot) {
-          const parentDir = dirnameOfPath(path);
-          const parentPath = parentDir === "." ? root : parentDir;
-          await loadDirectoryView(parentPath, parentDir === ".");
+        } catch (err) {
+          const status = extractHTTPStatusFromErrorMessage(
+            (err as Error)?.message || "",
+          );
+          if (status && handleRelayNavigationFailure(status, "")) {
+            return;
+          }
+          console.error("[file.open] failed", { root, path, cursor, err });
         }
-        return;
-      }
-      if (isActuallyRoot) { setCurrentRootId(path); setExpanded((prev) => Array.from(new Set([...prev, path]))); } else { setExpanded((prev) => Array.from(new Set([...prev, expandedKey]))); }
-      await loadDirectoryView(path, isActuallyRoot);
-    }
-  }), [handleRelayNavigationFailure, isMobile, normalizeTreeResponse, setDrawerOpenForRoot, replaceURLState, rememberCurrentFileScroll, treeCacheKey]);
+      },
+      open_dir: async (params: any) => {
+        fileOpenRequestRef.current += 1;
+        const path = params.path,
+          rootParam = params.root || currentRootIdRef.current,
+          isToggle = !!params.toggle;
+        if (!path || !rootParam) return;
+        setGitDiff(null);
+        const isActuallyRoot = params.isRoot === true;
+        const root = isActuallyRoot ? path : rootParam;
+        const expandedKey = isActuallyRoot ? path : `${root}:${path}`;
+        const preserveQuery = !!params.preservePluginQuery;
+        const nextPluginQuery = preserveQuery
+          ? parsePluginQuery(window.location.search)
+          : {};
+        const loadDirectoryView = async (
+          targetPath: string,
+          targetIsRoot: boolean,
+        ) => {
+          const apiDir = targetIsRoot ? "." : targetPath;
+          const cacheKey = treeCacheKey(root, apiDir);
+          if (currentRootIdRef.current !== root) {
+            setCurrentRootId(root);
+          }
+          setFile(null);
+          setSelectedSession(null);
+          setMainEntries([]);
+          setPluginQuery(nextPluginQuery);
+          replaceURLState({
+            root,
+            file: "",
+            session: "",
+            cursor: 0,
+            pluginQuery: nextPluginQuery,
+          });
+          const cachedEntries = entriesByPathRef.current[cacheKey];
+          if (
+            Object.prototype.hasOwnProperty.call(
+              entriesByPathRef.current,
+              cacheKey,
+            ) &&
+            !invalidTreeCacheKeysRef.current.has(cacheKey)
+          ) {
+            setMainEntries(cachedEntries || []);
+            setSelectedDir(targetPath);
+            setSelectedDirKey(
+              buildDirectorySelectionKey(root, targetPath, targetIsRoot),
+            );
+            setFile(null);
+            setSelectedSession(null);
+            fileCursorRef.current = 0;
+            setDrawerOpenForRoot(root, false);
+            if (isMobile) setIsLeftOpen(false);
+            return;
+          }
+          try {
+            const res = await fetch(
+              appURL("/api/tree", new URLSearchParams({ root, dir: apiDir })),
+            );
+            if (!res.ok) {
+              const payload = await res.json().catch(() => ({}));
+              if (
+                handleRelayNavigationFailure(
+                  res.status,
+                  typeof payload?.error === "string" ? payload.error : "",
+                )
+              ) {
+                return;
+              }
+              return;
+            }
+            const payload = await res.json();
+            const parsed = normalizeTreeResponse(payload);
+            invalidTreeCacheKeysRef.current.delete(cacheKey);
+            setEntriesByPath((prev) => ({
+              ...prev,
+              [cacheKey]: parsed.entries,
+            }));
+            setMainEntries(parsed.entries);
+            setSelectedDir(targetPath);
+            setSelectedDirKey(
+              buildDirectorySelectionKey(root, targetPath, targetIsRoot),
+            );
+            setFile(null);
+            setSelectedSession(null);
+            fileCursorRef.current = 0;
+            setDrawerOpenForRoot(root, false);
+            if (isMobile) setIsLeftOpen(false);
+          } catch {}
+        };
+        const isExpanded = expandedRef.current.includes(expandedKey);
+        const isCurrentExpandedRoot =
+          isActuallyRoot && isExpanded && currentRootIdRef.current === root;
+        if (
+          isToggle &&
+          ((!isActuallyRoot && isExpanded) || isCurrentExpandedRoot)
+        ) {
+          setExpanded((prev) => prev.filter((k) => k !== expandedKey));
+          if (!isActuallyRoot) {
+            const parentDir = dirnameOfPath(path);
+            const parentPath = parentDir === "." ? root : parentDir;
+            await loadDirectoryView(parentPath, parentDir === ".");
+          }
+          return;
+        }
+        if (isActuallyRoot) {
+          setCurrentRootId(path);
+          setExpanded((prev) => Array.from(new Set([...prev, path])));
+        } else {
+          setExpanded((prev) => Array.from(new Set([...prev, expandedKey])));
+        }
+        await loadDirectoryView(path, isActuallyRoot);
+      },
+    }),
+    [
+      handleRelayNavigationFailure,
+      isMobile,
+      normalizeTreeResponse,
+      setDrawerOpenForRoot,
+      replaceURLState,
+      rememberCurrentFileScroll,
+      treeCacheKey,
+    ],
+  );
   const actionHandlersRef = useRef(actionHandlers);
   useEffect(() => {
     actionHandlersRef.current = actionHandlers;
@@ -1799,15 +2662,22 @@ export function App() {
     const response = await fetch(appPath("/api/dirs"));
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
-      if (handleRelayNavigationFailure(response.status, typeof payload?.error === "string" ? payload.error : "")) {
+      if (
+        handleRelayNavigationFailure(
+          response.status,
+          typeof payload?.error === "string" ? payload.error : "",
+        )
+      ) {
         return;
       }
       return;
     }
-    const dirs = await response.json() as ManagedRootPayload[];
+    const dirs = (await response.json()) as ManagedRootPayload[];
     const nextDirs = Array.isArray(dirs) ? dirs : [];
     const nextRootIds = nextDirs.map((dir) => dir.id).filter(Boolean);
-    managedRootByIdRef.current = Object.fromEntries(nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]));
+    managedRootByIdRef.current = Object.fromEntries(
+      nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]),
+    );
 
     managedRootIdsRef.current = new Set(nextRootIds);
     setManagedRootIds(nextRootIds);
@@ -1825,7 +2695,13 @@ export function App() {
       setActiveBoundSessionKey(null);
       setInteractionMode("main");
       setIsDrawerOpen(false);
-      replaceURLState({ root: "", file: "", session: "", cursor: 0, pluginQuery: {} });
+      replaceURLState({
+        root: "",
+        file: "",
+        session: "",
+        cursor: 0,
+        pluginQuery: {},
+      });
       return;
     }
 
@@ -1835,8 +2711,14 @@ export function App() {
     }
 
     const lastRoot = loadLastRootId();
-    const nextRoot = lastRoot && nextRootIds.includes(lastRoot) ? lastRoot : nextRootIds[0];
-    await actionHandlersRef.current.open_dir({ path: nextRoot, root: nextRoot, preservePluginQuery: true, isRoot: true });
+    const nextRoot =
+      lastRoot && nextRootIds.includes(lastRoot) ? lastRoot : nextRootIds[0];
+    await actionHandlersRef.current.open_dir({
+      path: nextRoot,
+      root: nextRoot,
+      preservePluginQuery: true,
+      isRoot: true,
+    });
   }, [handleRelayNavigationFailure, replaceURLState]);
 
   const refreshRelayStatus = useCallback(async () => {
@@ -1848,7 +2730,7 @@ export function App() {
       if (!response.ok) {
         return;
       }
-      const payload = await response.json() as RelayStatusPayload;
+      const payload = (await response.json()) as RelayStatusPayload;
       setRelayStatus(payload);
       return payload;
     } catch {
@@ -1895,16 +2777,25 @@ export function App() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(String(payload?.message || payload?.error || "新建项目失败"));
+        throw new Error(
+          String(payload?.message || payload?.error || "新建项目失败"),
+        );
       }
       const created = payload as ManagedRootPayload;
       setCreatingRootName(null);
       await refreshManagedRoots();
       if (created?.id) {
-        await actionHandlersRef.current.open_dir({ path: created.id, root: created.id, isRoot: true });
+        await actionHandlersRef.current.open_dir({
+          path: created.id,
+          root: created.id,
+          isRoot: true,
+        });
       }
     } catch (err) {
-      reportError("root.create_failed", String((err as Error)?.message || "新建项目失败"));
+      reportError(
+        "root.create_failed",
+        String((err as Error)?.message || "新建项目失败"),
+      );
     } finally {
       setCreatingRootBusy(false);
     }
@@ -1925,16 +2816,24 @@ export function App() {
       return;
     }
     try {
-      const response = await fetch(appURL("/api/dirs", new URLSearchParams({ path: rootPath })), {
-        method: "DELETE",
-      });
+      const response = await fetch(
+        appURL("/api/dirs", new URLSearchParams({ path: rootPath })),
+        {
+          method: "DELETE",
+        },
+      );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(String(payload?.message || payload?.error || "移除项目失败"));
+        throw new Error(
+          String(payload?.message || payload?.error || "移除项目失败"),
+        );
       }
       await refreshManagedRoots();
     } catch (err) {
-      reportError("root.delete_failed", String((err as Error)?.message || "移除项目失败"));
+      reportError(
+        "root.delete_failed",
+        String((err as Error)?.message || "移除项目失败"),
+      );
     }
   }, [refreshManagedRoots]);
 
@@ -1980,7 +2879,9 @@ export function App() {
         if (!key) return;
         const root = currentRootIdRef.current;
         if (!root) return;
-        const matched = sessions.find((item) => (item.key || item.session_key) === key);
+        const matched = sessions.find(
+          (item) => (item.key || item.session_key) === key,
+        );
         if (matched) {
           await handleSelectSession(matched);
           return;
@@ -1990,14 +2891,19 @@ export function App() {
       navigate: async (params: Record<string, unknown>) => {
         const current = readURLState();
         const nextRoot = current.root || currentRootIdRef.current || "";
-        const nextPath = typeof params?.path === "string" ? params.path : current.file;
+        const nextPath =
+          typeof params?.path === "string" ? params.path : current.file;
         const explicitCursor = normalizeCursor(params?.cursor);
         const rawQuery =
-          params?.query && typeof params.query === "object" && !Array.isArray(params.query)
+          params?.query &&
+          typeof params.query === "object" &&
+          !Array.isArray(params.query)
             ? (params.query as Record<string, unknown>)
             : null;
 
-        const nextPluginQuery: Record<string, string> = { ...current.pluginQuery };
+        const nextPluginQuery: Record<string, string> = {
+          ...current.pluginQuery,
+        };
         if (rawQuery) {
           Object.entries(rawQuery).forEach(([key, value]) => {
             if (!key) return;
@@ -2008,7 +2914,10 @@ export function App() {
         let nextCursor = current.cursor;
         if (explicitCursor !== null) {
           nextCursor = explicitCursor;
-        } else if (typeof params?.path === "string" && params.path !== current.file) {
+        } else if (
+          typeof params?.path === "string" &&
+          params.path !== current.file
+        ) {
           nextCursor = 0;
         }
         if (!nextPath) {
@@ -2024,12 +2933,20 @@ export function App() {
         };
         replaceURLState(nextState);
         if (nextState.file) {
-          persistPluginQuery(nextState.root, nextState.file, nextState.pluginQuery);
+          persistPluginQuery(
+            nextState.root,
+            nextState.file,
+            nextState.pluginQuery,
+          );
         }
 
-        const rootChanged = (nextState.root || "") !== (currentRootIdRef.current || "");
-        const fileChanged = (nextState.file || "") !== (fileRef.current?.path || "");
-        const pluginChanged = JSON.stringify(nextState.pluginQuery) !== JSON.stringify(current.pluginQuery);
+        const rootChanged =
+          (nextState.root || "") !== (currentRootIdRef.current || "");
+        const fileChanged =
+          (nextState.file || "") !== (fileRef.current?.path || "");
+        const pluginChanged =
+          JSON.stringify(nextState.pluginQuery) !==
+          JSON.stringify(current.pluginQuery);
 
         if (pluginChanged) {
           setPluginQuery(nextState.pluginQuery);
@@ -2037,90 +2954,139 @@ export function App() {
 
         if (!nextState.file) {
           if (nextState.root) {
-            await actionHandlers.open_dir({ path: nextState.root, root: nextState.root, preservePluginQuery: true, isRoot: true });
+            await actionHandlers.open_dir({
+              path: nextState.root,
+              root: nextState.root,
+              preservePluginQuery: true,
+              isRoot: true,
+            });
           }
           return;
         }
 
         const cursorChanged = nextState.cursor !== fileCursorRef.current;
         if (rootChanged || fileChanged || cursorChanged) {
-          await actionHandlers.open({ path: nextState.file, root: nextState.root, cursor: nextState.cursor, preservePluginQuery: true });
+          await actionHandlers.open({
+            path: nextState.file,
+            root: nextState.root,
+            cursor: nextState.cursor,
+            preservePluginQuery: true,
+          });
         }
       },
     }),
     [actionHandlers, sessions, handleSelectSession, replaceURLState],
   );
 
-  const handleSessionChipClick = useCallback((sessionKey: string, rootOverride?: string | null) => {
-    if (!sessionKey) return;
-    const root = rootOverride || file?.root || currentRootIdRef.current;
-    if (!root) return;
-    const matched = sessions.find((item) => {
-      const key = item.key || item.session_key;
-      return key === sessionKey;
-    });
-    if (matched) {
-      handleSelectSession(matched);
-      return;
-    }
-    handleSelectSession({
-      key: sessionKey,
-      session_key: sessionKey,
-      root_id: root,
-    });
-  }, [file, sessions, handleSelectSession]);
+  const handleSessionChipClick = useCallback(
+    (sessionKey: string, rootOverride?: string | null) => {
+      if (!sessionKey) return;
+      const root = rootOverride || file?.root || currentRootIdRef.current;
+      if (!root) return;
+      const matched = sessions.find((item) => {
+        const key = item.key || item.session_key;
+        return key === sessionKey;
+      });
+      if (matched) {
+        handleSelectSession(matched);
+        return;
+      }
+      handleSelectSession({
+        key: sessionKey,
+        session_key: sessionKey,
+        root_id: root,
+      });
+    },
+    [file, sessions, handleSelectSession],
+  );
 
-  const handleFileViewerPathClick = useCallback((path: string) => {
-    if (!file) return;
-    const root = file.root || currentRootIdRef.current;
-    if (!root) return;
-    actionHandlers.open_dir({ path: path === "." ? root : path, root, isRoot: path === "." });
-  }, [file, actionHandlers]);
+  const handleFileViewerPathClick = useCallback(
+    (path: string) => {
+      if (!file) return;
+      const root = file.root || currentRootIdRef.current;
+      if (!root) return;
+      actionHandlers.open_dir({
+        path: path === "." ? root : path,
+        root,
+        isRoot: path === ".",
+      });
+    },
+    [file, actionHandlers],
+  );
 
-  const handleFileViewerFileClick = useCallback((path: string) => {
-    if (!file) return;
-    const root = file.root || currentRootIdRef.current;
-    if (!root) return;
-    actionHandlers.open({ path, root });
-  }, [file, actionHandlers]);
+  const handleFileViewerFileClick = useCallback(
+    (path: string) => {
+      if (!file) return;
+      const root = file.root || currentRootIdRef.current;
+      if (!root) return;
+      actionHandlers.open({ path, root });
+    },
+    [file, actionHandlers],
+  );
 
-  const handleGitDiffPathClick = useCallback((path: string) => {
-    const root = currentRootIdRef.current;
-    if (!root) return;
-    setGitDiff(null);
-    actionHandlers.open_dir({ path: path === "." ? root : path, root, isRoot: path === "." });
-  }, [actionHandlers]);
+  const handleGitDiffPathClick = useCallback(
+    (path: string) => {
+      const root = currentRootIdRef.current;
+      if (!root) return;
+      setGitDiff(null);
+      actionHandlers.open_dir({
+        path: path === "." ? root : path,
+        root,
+        isRoot: path === ".",
+      });
+    },
+    [actionHandlers],
+  );
 
-  const handleDirectoryPathClick = useCallback((path: string) => {
-    const root = currentRootIdRef.current;
-    if (!root) return;
-    actionHandlers.open_dir({ path: path === "." ? root : path, root, isRoot: path === "." });
-  }, [actionHandlers]);
+  const handleDirectoryPathClick = useCallback(
+    (path: string) => {
+      const root = currentRootIdRef.current;
+      if (!root) return;
+      actionHandlers.open_dir({
+        path: path === "." ? root : path,
+        root,
+        isRoot: path === ".",
+      });
+    },
+    [actionHandlers],
+  );
 
   const visibleMainEntries = useMemo(
-    () => (showHiddenFiles ? mainEntries : mainEntries.filter((entry) => !entry.name.startsWith("."))),
+    () =>
+      showHiddenFiles
+        ? mainEntries
+        : mainEntries.filter((entry) => !entry.name.startsWith(".")),
     [mainEntries, showHiddenFiles],
   );
 
   const gitFileStatsByPath = useMemo<Record<string, GitFileStat>>(() => {
     const items = gitStatus?.items || [];
-    return Object.fromEntries(items.map((item) => [
-      item.path,
-      { status: item.status, additions: item.additions, deletions: item.deletions },
-    ]));
+    return Object.fromEntries(
+      items.map((item) => [
+        item.path,
+        {
+          status: item.status,
+          additions: item.additions,
+          deletions: item.deletions,
+        },
+      ]),
+    );
   }, [gitStatus]);
 
   const filteredGitStatus = useMemo<GitStatusPayload | null>(() => {
     if (!gitStatus) {
       return null;
     }
-    const currentDir = selectedDir && selectedDir !== currentRootId ? selectedDir : ".";
+    const currentDir =
+      selectedDir && selectedDir !== currentRootId ? selectedDir : ".";
     if (!currentDir || currentDir === ".") {
       return gitStatus;
     }
     const prefix = `${currentDir.replace(/^\/+|\/+$/g, "")}/`;
     const items = (gitStatus.items || [])
-      .filter((item) => item.path === currentDir || item.path.startsWith(prefix))
+      .filter(
+        (item) => item.path === currentDir || item.path.startsWith(prefix),
+      )
       .map((item) => ({
         ...item,
         display_path: trimGitPathPrefix(item.path, currentDir),
@@ -2138,15 +3104,33 @@ export function App() {
     setStatus("Connected");
   }, [currentRootId]);
 
-  useEffect(() => () => {
-    sessionService.disconnect();
-    setStatus("Disconnected");
-  }, []);
+  useEffect(() => {
+    if (sessionListMode !== "import") return;
+    const rootID = currentRootIdRef.current || "";
+    if (!rootID || !externalImportAgent) return;
+    void loadExternalSessions(rootID, externalImportAgent, { replace: true });
+  }, [
+    sessionListMode,
+    externalImportAgent,
+    externalFilterBound,
+    loadExternalSessions,
+  ]);
+
+  useEffect(
+    () => () => {
+      sessionService.disconnect();
+      setStatus("Disconnected");
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!currentRootId) {
       setGitStatus(null);
       setGitDiff(null);
+      setSessionListMode("local");
+      setExternalSessions([]);
+      setExternalSelectedKey("");
       return;
     }
     void refreshGitStatus(currentRootId);
@@ -2156,12 +3140,15 @@ export function App() {
   useEffect(() => {
     if (!currentRootId) return;
     let cancelled = false;
-    const loadSessions = async (rootID: string, options?: { beforeTime?: string; afterTime?: string; replace?: boolean }) => {
+    const loadSessions = async (
+      rootID: string,
+      options?: { beforeTime?: string; afterTime?: string; replace?: boolean },
+    ) => {
       try {
-        const next = await sessionService.fetchSessions(rootID, {
+        const next = (await sessionService.fetchSessions(rootID, {
           beforeTime: options?.beforeTime,
           afterTime: options?.afterTime,
-        }) as SessionItem[];
+        })) as SessionItem[];
         if (cancelled) return;
         setHasMoreSessions(next.length >= 50);
         if (options?.replace || (!options?.beforeTime && !options?.afterTime)) {
@@ -2171,27 +3158,43 @@ export function App() {
         setSessions((prev) => mergeSessionItems(prev, next));
       } catch {}
     };
-    const reloadSessionForReplay = async (rootID: string, sessionKey: string) => {
+    const reloadSessionForReplay = async (
+      rootID: string,
+      sessionKey: string,
+    ) => {
       if (!rootID || !sessionKey) return;
       const cacheKey = rootSessionKey(rootID, sessionKey);
       const currentInMemory = sessionCacheRef.current[cacheKey];
       const inflight = loadingSessionRef.current[cacheKey];
-      const request = inflight || syncSession(rootID, sessionKey).finally(() => {
-        delete loadingSessionRef.current[cacheKey];
-      });
+      const request =
+        inflight ||
+        syncSession(rootID, sessionKey).finally(() => {
+          delete loadingSessionRef.current[cacheKey];
+        });
       if (!inflight) {
         loadingSessionRef.current[cacheKey] = request;
       }
       const syncResult = await request;
       if (cancelled) return;
-      const shouldApply = !!syncResult.session && (syncResult.hasDelta || !currentInMemory);
+      const shouldApply =
+        !!syncResult.session && (syncResult.hasDelta || !currentInMemory);
       if (shouldApply && syncResult.session) {
-        const normalized = { ...(syncResult.session as any), key: sessionKey } as Session;
+        const normalized = {
+          ...(syncResult.session as any),
+          key: sessionKey,
+        } as Session;
         sessionCacheRef.current[cacheKey] = normalized;
         loadedSessionRef.current[cacheKey] = true;
         bumpCacheVersion();
-        if ((selectedSessionRef.current?.key || selectedSessionRef.current?.session_key) === sessionKey) {
-          setSelectedSession((prev) => prev ? ({ ...(prev as any), ...(normalized as any) } as SessionItem) : prev);
+        if (
+          (selectedSessionRef.current?.key ||
+            selectedSessionRef.current?.session_key) === sessionKey
+        ) {
+          setSelectedSession((prev) =>
+            prev
+              ? ({ ...(prev as any), ...(normalized as any) } as SessionItem)
+              : prev,
+          );
         }
         if (boundSessionByRootRef.current[rootID] === sessionKey) {
           setDrawerSessionForRoot(rootID, normalized);
@@ -2199,9 +3202,15 @@ export function App() {
       }
       await sessionService.markSessionReady(rootID, sessionKey);
     };
-    const refreshSessionRelatedFiles = async (rootID: string, sessionKey: string) => {
+    const refreshSessionRelatedFiles = async (
+      rootID: string,
+      sessionKey: string,
+    ) => {
       if (!rootID || !sessionKey) return;
-      const relatedFiles = await sessionService.getSessionRelatedFiles(rootID, sessionKey);
+      const relatedFiles = await sessionService.getSessionRelatedFiles(
+        rootID,
+        sessionKey,
+      );
       if (cancelled) return;
       await setCachedSessionRelatedFiles(rootID, sessionKey, relatedFiles);
       updateSessionRelatedFilesForKey(rootID, sessionKey, relatedFiles);
@@ -2218,35 +3227,59 @@ export function App() {
         ? sessionCacheRef.current[cacheKey]
         : drawerSessionByRootRef.current[rootID];
       if (latest && latest.key === sessionKey) {
-        setDrawerSessionForRoot(rootID, { ...(latest as any), pending: false } as Session);
+        setDrawerSessionForRoot(rootID, {
+          ...(latest as any),
+          pending: false,
+        } as Session);
       }
     };
 
     const handleSessionStream = (payload: any) => {
-      const streamKey = typeof payload?.session_key === "string" ? payload.session_key : "";
-      const activeRoot = typeof payload?.root_id === "string" && payload.root_id
-        ? payload.root_id
-        : (resolveRootForSessionKey(streamKey) || currentRootIdRef.current);
+      const streamKey =
+        typeof payload?.session_key === "string" ? payload.session_key : "";
+      const activeRoot =
+        typeof payload?.root_id === "string" && payload.root_id
+          ? payload.root_id
+          : resolveRootForSessionKey(streamKey) || currentRootIdRef.current;
       if (!streamKey || !activeRoot) return;
       const ck = rootSessionKey(activeRoot, streamKey);
       let pending = pendingBySessionRef.current[ck];
-      if (!pending) { const draft = pendingDraftRef.current; if (draft && draft.rootId === activeRoot) { pending = draft; pendingBySessionRef.current[ck] = draft; pendingDraftRef.current = null; } }
+      if (!pending) {
+        const draft = pendingDraftRef.current;
+        if (draft && draft.rootId === activeRoot) {
+          pending = draft;
+          pendingBySessionRef.current[ck] = draft;
+          pendingDraftRef.current = null;
+        }
+      }
       const boundKey = boundSessionByRootRef.current[activeRoot] || null;
-      if (!boundKey || (typeof boundKey === "string" && boundKey.startsWith("pending-"))) {
+      if (
+        !boundKey ||
+        (typeof boundKey === "string" && boundKey.startsWith("pending-"))
+      ) {
         setBoundSessionForRoot(activeRoot, streamKey);
         if (pending) {
-          const userEx = { role: "user", content: pending.message, timestamp: pending.timestamp, model: pending.model };
-          const cached = sessionCacheRef.current[ck] || ({
-            key: streamKey,
-            type: pending.mode,
-            agent: pending.agent,
+          const userEx = {
+            role: "user",
+            content: pending.message,
+            timestamp: pending.timestamp,
             model: pending.model,
-            name: "",
-            created_at: pending.timestamp,
-            updated_at: pending.timestamp,
-            exchanges: [],
-          } as any);
-          const prevExchanges = Array.isArray((cached as any).exchanges) ? ((cached as any).exchanges as Exchange[]) : [];
+          };
+          const cached =
+            sessionCacheRef.current[ck] ||
+            ({
+              key: streamKey,
+              type: pending.mode,
+              agent: pending.agent,
+              model: pending.model,
+              name: "",
+              created_at: pending.timestamp,
+              updated_at: pending.timestamp,
+              exchanges: [],
+            } as any);
+          const prevExchanges = Array.isArray((cached as any).exchanges)
+            ? ((cached as any).exchanges as Exchange[])
+            : [];
           sessionCacheRef.current[ck] = {
             ...(cached as any),
             exchanges: prevExchanges.length > 0 ? prevExchanges : [userEx],
@@ -2256,45 +3289,79 @@ export function App() {
         }
         const seeded = sessionCacheRef.current[ck];
         if (seeded) {
-          setDrawerSessionForRoot(activeRoot, { ...(seeded as any), pending: true } as Session);
+          setDrawerSessionForRoot(activeRoot, {
+            ...(seeded as any),
+            pending: true,
+          } as Session);
         }
       }
       const event = payload.event;
       if (!event?.type) return;
       switch (event.type) {
         case "message_chunk":
-          appendAgentChunkForSession(activeRoot, streamKey, event.data?.content || "", pending?.agent);
+          appendAgentChunkForSession(
+            activeRoot,
+            streamKey,
+            event.data?.content || "",
+            pending?.agent,
+          );
           {
             const latest = sessionCacheRef.current[ck];
             if (latest) {
-              setDrawerSessionForRoot(activeRoot, { ...(latest as any), pending: true } as Session);
+              setDrawerSessionForRoot(activeRoot, {
+                ...(latest as any),
+                pending: true,
+              } as Session);
             }
           }
           break;
         case "thought_chunk":
-          appendThoughtChunkForSession(activeRoot, streamKey, event.data?.content || "");
+          appendThoughtChunkForSession(
+            activeRoot,
+            streamKey,
+            event.data?.content || "",
+          );
           {
             const latest = sessionCacheRef.current[ck];
             if (latest) {
-              setDrawerSessionForRoot(activeRoot, { ...(latest as any), pending: true } as Session);
+              setDrawerSessionForRoot(activeRoot, {
+                ...(latest as any),
+                pending: true,
+              } as Session);
             }
           }
           break;
         case "tool_call":
-          appendToolCallForSession(activeRoot, streamKey, event.data || {}, false);
+          appendToolCallForSession(
+            activeRoot,
+            streamKey,
+            event.data || {},
+            false,
+          );
           {
             const latest = sessionCacheRef.current[ck];
             if (latest) {
-              setDrawerSessionForRoot(activeRoot, { ...(latest as any), pending: true } as Session);
+              setDrawerSessionForRoot(activeRoot, {
+                ...(latest as any),
+                pending: true,
+              } as Session);
             }
           }
           break;
         case "tool_call_update":
-          appendToolCallForSession(activeRoot, streamKey, event.data || {}, true);
+          appendToolCallForSession(
+            activeRoot,
+            streamKey,
+            event.data || {},
+            true,
+          );
           {
             const latest = sessionCacheRef.current[ck];
             if (latest) {
-              setDrawerSessionForRoot(activeRoot, { ...(latest as any), pending: true } as Session);
+              setDrawerSessionForRoot(activeRoot, {
+                ...(latest as any),
+                pending: true,
+              } as Session);
             }
           }
           break;
@@ -2320,24 +3387,35 @@ export function App() {
     };
     const stringList = (value: unknown): string[] => {
       if (!Array.isArray(value)) return [];
-      return Array.from(new Set(value.filter((item): item is string => typeof item === "string" && item !== "")));
+      return Array.from(
+        new Set(
+          value.filter(
+            (item): item is string => typeof item === "string" && item !== "",
+          ),
+        ),
+      );
     };
     const handleFileChangedBatch = (payload: any) => {
-      const rootID = typeof payload?.root_id === "string" ? payload.root_id : "";
+      const rootID =
+        typeof payload?.root_id === "string" ? payload.root_id : "";
       if (!rootID) return;
 
       const paths = stringList(payload?.paths);
       const events = Array.isArray(payload?.events) ? payload.events : [];
       const dirPathSet = new Set(stringList(payload?.dirs));
       for (const path of paths) {
-	        const parentDir = dirname(path);
-	        dirPathSet.add(parentDir);
-	        const event = events.find((item: any) => item?.path === path);
-	        const op = typeof event?.op === "string" ? event.op : "";
-	        if (event?.is_dir === true || op.includes("REMOVE") || op.includes("RENAME")) {
-	          dirPathSet.add(path);
-	        }
-	      }
+        const parentDir = dirname(path);
+        dirPathSet.add(parentDir);
+        const event = events.find((item: any) => item?.path === path);
+        const op = typeof event?.op === "string" ? event.op : "";
+        if (
+          event?.is_dir === true ||
+          op.includes("REMOVE") ||
+          op.includes("RENAME")
+        ) {
+          dirPathSet.add(path);
+        }
+      }
       const dirs = Array.from(dirPathSet);
       if (paths.length === 0 && dirs.length === 0) return;
 
@@ -2346,8 +3424,13 @@ export function App() {
       }
 
       const currentFile = fileRef.current;
-      const currentFileRoot = currentFile?.root || currentRootIdRef.current || "";
-      if (currentFile && currentFileRoot === rootID && paths.includes(currentFile.path)) {
+      const currentFileRoot =
+        currentFile?.root || currentRootIdRef.current || "";
+      if (
+        currentFile &&
+        currentFileRoot === rootID &&
+        paths.includes(currentFile.path)
+      ) {
         void refreshCurrentFileContent(rootID, currentFile.path);
       }
 
@@ -2359,15 +3442,29 @@ export function App() {
           return;
         }
         const changedDiffPath = gitDiff?.path || "";
-        if (rootID === currentRootIdRef.current && changedDiffPath && paths.includes(changedDiffPath)) {
-          const target = next.items.find((item) => item.path === changedDiffPath);
+        if (
+          rootID === currentRootIdRef.current &&
+          changedDiffPath &&
+          paths.includes(changedDiffPath)
+        ) {
+          const target = next.items.find(
+            (item) => item.path === changedDiffPath,
+          );
           if (!target) {
             setGitDiff(null);
             return;
           }
-          void fetchGitDiff(rootID, changedDiffPath, { cacheSignature: buildGitDiffCacheSignature(target) }).then(setGitDiff).catch((err) => {
-            console.error("[git.diff.refresh] failed", { rootID, changedPath: changedDiffPath, err });
-          });
+          void fetchGitDiff(rootID, changedDiffPath, {
+            cacheSignature: buildGitDiffCacheSignature(target),
+          })
+            .then(setGitDiff)
+            .catch((err) => {
+              console.error("[git.diff.refresh] failed", {
+                rootID,
+                changedPath: changedDiffPath,
+                err,
+              });
+            });
         }
       });
 
@@ -2380,7 +3477,8 @@ export function App() {
       }
     };
     const handleFileChanged = (payload: any) => {
-      const rootID = typeof payload?.root_id === "string" ? payload.root_id : "";
+      const rootID =
+        typeof payload?.root_id === "string" ? payload.root_id : "";
       const changedPath = typeof payload?.path === "string" ? payload.path : "";
       if (!rootID || !changedPath) return;
       const dirs = [dirname(changedPath)];
@@ -2391,7 +3489,9 @@ export function App() {
         root_id: rootID,
         paths: [changedPath],
         dirs,
-        events: [{ path: changedPath, op: payload?.op, is_dir: payload?.is_dir }],
+        events: [
+          { path: changedPath, op: payload?.op, is_dir: payload?.is_dir },
+        ],
       });
     };
     const unsubscribeEvents = sessionService.subscribeEvents((event) => {
@@ -2401,15 +3501,22 @@ export function App() {
           void refreshManagedRoots();
           if (currentRootIdRef.current) {
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(currentRootIdRef.current, newest ? { afterTime: newest } : { replace: true });
+            void loadSessions(
+              currentRootIdRef.current,
+              newest ? { afterTime: newest } : { replace: true },
+            );
           }
           break;
         case "ws.reconnected":
           void refreshManagedRoots();
           if (currentRootIdRef.current) {
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(currentRootIdRef.current, newest ? { afterTime: newest } : { replace: true });
-            const boundKey = boundSessionByRootRef.current[currentRootIdRef.current] || "";
+            void loadSessions(
+              currentRootIdRef.current,
+              newest ? { afterTime: newest } : { replace: true },
+            );
+            const boundKey =
+              boundSessionByRootRef.current[currentRootIdRef.current] || "";
             if (boundKey) {
               void reloadSessionForReplay(currentRootIdRef.current, boundKey);
             }
@@ -2418,15 +3525,31 @@ export function App() {
         case "root.changed":
           void refreshManagedRoots();
           break;
-        case "session.stream": handleSessionStream(payload); break;
+        case "session.imported": {
+          const rootID =
+            typeof payload?.root_id === "string" ? payload.root_id : "";
+          if (!rootID) {
+            break;
+          }
+          if (rootID === currentRootIdRef.current) {
+            void loadSessions(rootID, { replace: true });
+          }
+          break;
+        }
+        case "session.stream":
+          handleSessionStream(payload);
+          break;
         case "session.accepted": {
-          const requestId = typeof payload?.request_id === "string" ? payload.request_id : "";
+          const requestId =
+            typeof payload?.request_id === "string" ? payload.request_id : "";
           const pending = pendingRequestRef.current[requestId];
           if (!requestId || !pending) {
             break;
           }
           delete pendingRequestRef.current[requestId];
-          const markAccepted = (sess: Session | null | undefined): Session | null => {
+          const markAccepted = (
+            sess: Session | null | undefined,
+          ): Session | null => {
             if (!sess) return null;
             const exchanges = Array.isArray((sess as any).exchanges)
               ? ((sess as any).exchanges as Exchange[]).map((exchange) =>
@@ -2434,7 +3557,7 @@ export function App() {
                   exchange.content === pending.message &&
                   exchange.timestamp === pending.timestamp
                     ? { ...exchange, pending_ack: false }
-                    : exchange
+                    : exchange,
                 )
               : [];
             return { ...(sess as any), exchanges } as Session;
@@ -2449,7 +3572,10 @@ export function App() {
           }
           const latestDrawer = drawerSessionByRootRef.current[pending.rootId];
           const drawerKey = latestDrawer?.key || "";
-          if (drawerKey && (drawerKey === pending.sessionKey || drawerKey === pending.tempKey)) {
+          if (
+            drawerKey &&
+            (drawerKey === pending.sessionKey || drawerKey === pending.tempKey)
+          ) {
             const accepted = markAccepted(latestDrawer);
             if (accepted) {
               setDrawerSessionForRoot(pending.rootId, accepted);
@@ -2458,8 +3584,11 @@ export function App() {
           break;
         }
         case "session.error": {
-          const requestId = typeof payload?.request_id === "string" ? payload.request_id : "";
-          const pending = requestId ? pendingRequestRef.current[requestId] : null;
+          const requestId =
+            typeof payload?.request_id === "string" ? payload.request_id : "";
+          const pending = requestId
+            ? pendingRequestRef.current[requestId]
+            : null;
           if (!requestId || !pending) {
             break;
           }
@@ -2469,79 +3598,131 @@ export function App() {
           const latestDrawer = drawerSessionByRootRef.current[rootID];
           if (targetKey && latestDrawer?.key === targetKey) {
             const exchanges = Array.isArray((latestDrawer as any).exchanges)
-              ? ((latestDrawer as any).exchanges as Exchange[]).map((exchange) =>
-                  exchange.pending_ack === true &&
-                  exchange.content === pending.message &&
-                  exchange.timestamp === pending.timestamp
-                    ? { ...exchange, pending_ack: false }
-                    : exchange
+              ? ((latestDrawer as any).exchanges as Exchange[]).map(
+                  (exchange) =>
+                    exchange.pending_ack === true &&
+                    exchange.content === pending.message &&
+                    exchange.timestamp === pending.timestamp
+                      ? { ...exchange, pending_ack: false }
+                      : exchange,
                 )
               : [];
-            setDrawerSessionForRoot(rootID, { ...(latestDrawer as any), pending: false, exchanges } as Session);
+            setDrawerSessionForRoot(rootID, {
+              ...(latestDrawer as any),
+              pending: false,
+              exchanges,
+            } as Session);
           }
           break;
         }
         case "session.done": {
-          const sessionKey = typeof payload?.session_key === "string" ? payload.session_key : "";
-          const rootID = typeof payload?.root_id === "string" && payload.root_id
-            ? payload.root_id
-            : (resolveRootForSessionKey(sessionKey) || currentRootIdRef.current || "");
+          const sessionKey =
+            typeof payload?.session_key === "string" ? payload.session_key : "";
+          const rootID =
+            typeof payload?.root_id === "string" && payload.root_id
+              ? payload.root_id
+              : resolveRootForSessionKey(sessionKey) ||
+                currentRootIdRef.current ||
+                "";
           if (rootID && sessionKey) {
             handleSessionStreamDone(rootID, sessionKey);
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(rootID, newest ? { afterTime: newest } : { replace: true });
+            void loadSessions(
+              rootID,
+              newest ? { afterTime: newest } : { replace: true },
+            );
           } else if (currentRootIdRef.current) {
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(currentRootIdRef.current, newest ? { afterTime: newest } : { replace: true });
+            void loadSessions(
+              currentRootIdRef.current,
+              newest ? { afterTime: newest } : { replace: true },
+            );
           }
           break;
         }
         case "session.user_message":
-          if (typeof payload?.session_key === "string" && typeof payload?.root_id === "string") {
+          if (
+            typeof payload?.session_key === "string" &&
+            typeof payload?.root_id === "string"
+          ) {
             const rootID = payload.root_id;
             const sessionKey = payload.session_key;
             const exchange = payload.exchange;
             const sessionMeta = payload.session;
             const cacheKey = rootSessionKey(rootID, sessionKey);
-            const cached = sessionCacheRef.current[cacheKey] || ({
-              key: sessionKey,
-              type: sessionMeta?.type || "chat",
-              agent: sessionMeta?.agent || exchange?.agent || "",
-              model: sessionMeta?.model || exchange?.model || "",
-              name: sessionMeta?.name || "新会话",
-              created_at: sessionMeta?.created_at || exchange?.timestamp || new Date().toISOString(),
-              updated_at: sessionMeta?.updated_at || exchange?.timestamp || new Date().toISOString(),
-              exchanges: [],
-            } as any);
-            const prevExchanges = Array.isArray((cached as any).exchanges) ? ((cached as any).exchanges as Exchange[]) : [];
-            const duplicate = prevExchanges.some((item) =>
-              item.role === "user" &&
-              item.content === exchange?.content &&
-              item.timestamp === exchange?.timestamp
+            const cached =
+              sessionCacheRef.current[cacheKey] ||
+              ({
+                key: sessionKey,
+                type: sessionMeta?.type || "chat",
+                agent: sessionMeta?.agent || exchange?.agent || "",
+                model: sessionMeta?.model || exchange?.model || "",
+                name: sessionMeta?.name || "新会话",
+                created_at:
+                  sessionMeta?.created_at ||
+                  exchange?.timestamp ||
+                  new Date().toISOString(),
+                updated_at:
+                  sessionMeta?.updated_at ||
+                  exchange?.timestamp ||
+                  new Date().toISOString(),
+                exchanges: [],
+              } as any);
+            const prevExchanges = Array.isArray((cached as any).exchanges)
+              ? ((cached as any).exchanges as Exchange[])
+              : [];
+            const duplicate = prevExchanges.some(
+              (item) =>
+                item.role === "user" &&
+                item.content === exchange?.content &&
+                item.timestamp === exchange?.timestamp,
             );
             sessionCacheRef.current[cacheKey] = {
               ...(cached as any),
               ...(sessionMeta || {}),
               key: sessionKey,
-              agent: sessionMeta?.agent || exchange?.agent || (cached as any).agent || "",
-              model: sessionMeta?.model || exchange?.model || (cached as any).model || "",
-              exchanges: duplicate ? prevExchanges : [...prevExchanges, {
-                role: "user",
-                agent: exchange?.agent || "",
-                model: exchange?.model || "",
-                content: exchange?.content || "",
-                timestamp: exchange?.timestamp || new Date().toISOString(),
-                pending_ack: false,
-              }],
-              updated_at: sessionMeta?.updated_at || exchange?.timestamp || new Date().toISOString(),
+              agent:
+                sessionMeta?.agent ||
+                exchange?.agent ||
+                (cached as any).agent ||
+                "",
+              model:
+                sessionMeta?.model ||
+                exchange?.model ||
+                (cached as any).model ||
+                "",
+              exchanges: duplicate
+                ? prevExchanges
+                : [
+                    ...prevExchanges,
+                    {
+                      role: "user",
+                      agent: exchange?.agent || "",
+                      model: exchange?.model || "",
+                      content: exchange?.content || "",
+                      timestamp:
+                        exchange?.timestamp || new Date().toISOString(),
+                      pending_ack: false,
+                    },
+                  ],
+              updated_at:
+                sessionMeta?.updated_at ||
+                exchange?.timestamp ||
+                new Date().toISOString(),
             } as Session;
             bumpCacheVersion();
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(rootID, newest ? { afterTime: newest } : { replace: true });
+            void loadSessions(
+              rootID,
+              newest ? { afterTime: newest } : { replace: true },
+            );
           }
           break;
         case "session.meta.updated":
-          if (typeof payload?.root_id === "string" && typeof payload?.session?.key === "string") {
+          if (
+            typeof payload?.root_id === "string" &&
+            typeof payload?.session?.key === "string"
+          ) {
             const rootID = payload.root_id;
             const sessionKey = payload.session.key;
             const cacheKey = rootSessionKey(rootID, sessionKey);
@@ -2549,19 +3730,38 @@ export function App() {
             if (cached) {
               sessionCacheRef.current[cacheKey] = {
                 ...cached,
-                name: typeof payload.session.name === "string" ? payload.session.name : cached.name,
-                model: typeof payload.session.model === "string" ? payload.session.model : (cached as any).model,
+                name:
+                  typeof payload.session.name === "string"
+                    ? payload.session.name
+                    : cached.name,
+                model:
+                  typeof payload.session.model === "string"
+                    ? payload.session.model
+                    : (cached as any).model,
                 updated_at: payload.session.updated_at || cached.updated_at,
               } as Session;
               bumpCacheVersion();
             }
-            if ((selectedSessionRef.current?.key || selectedSessionRef.current?.session_key) === sessionKey) {
-              setSelectedSession((prev) => prev ? ({
-                ...(prev as any),
-                name: typeof payload.session.name === "string" ? payload.session.name : prev.name,
-                model: typeof payload.session.model === "string" ? payload.session.model : (prev as any).model,
-                updated_at: payload.session.updated_at || prev.updated_at,
-              } as SessionItem) : prev);
+            if (
+              (selectedSessionRef.current?.key ||
+                selectedSessionRef.current?.session_key) === sessionKey
+            ) {
+              setSelectedSession((prev) =>
+                prev
+                  ? ({
+                      ...(prev as any),
+                      name:
+                        typeof payload.session.name === "string"
+                          ? payload.session.name
+                          : prev.name,
+                      model:
+                        typeof payload.session.model === "string"
+                          ? payload.session.model
+                          : (prev as any).model,
+                      updated_at: payload.session.updated_at || prev.updated_at,
+                    } as SessionItem)
+                  : prev,
+              );
             }
             if (boundSessionByRootRef.current[rootID] === sessionKey) {
               const latest = sessionCacheRef.current[cacheKey];
@@ -2570,20 +3770,31 @@ export function App() {
               }
             }
             const newest = sessionsRef.current[0]?.updated_at || "";
-            void loadSessions(rootID, newest ? { afterTime: newest } : { replace: true });
+            void loadSessions(
+              rootID,
+              newest ? { afterTime: newest } : { replace: true },
+            );
           }
           break;
         case "session.related_files.updated": {
-          const rootID = typeof payload?.root_id === "string" ? payload.root_id : "";
-          const sessionKey = typeof payload?.session_key === "string" ? payload.session_key : "";
+          const rootID =
+            typeof payload?.root_id === "string" ? payload.root_id : "";
+          const sessionKey =
+            typeof payload?.session_key === "string" ? payload.session_key : "";
           if (rootID && sessionKey) {
             void refreshSessionRelatedFiles(rootID, sessionKey);
           }
           break;
         }
-        case "file.changed.batch": handleFileChangedBatch(payload); break;
-        case "file.changed": handleFileChanged(payload); break;
-        case "agent.status.changed": setAgentsVersion(v => v + 1); break;
+        case "file.changed.batch":
+          handleFileChangedBatch(payload);
+          break;
+        case "file.changed":
+          handleFileChanged(payload);
+          break;
+        case "agent.status.changed":
+          setAgentsVersion((v) => v + 1);
+          break;
         case "app.update":
           setUpdateState(normalizeUpdateState(payload?.state as UpdateState));
           break;
@@ -2594,24 +3805,44 @@ export function App() {
       cancelled = true;
       unsubscribeEvents();
     };
-  }, [currentRootId, gitDiff?.path, mergeSessionItems, rootSessionKey, resolveRootForSessionKey, appendAgentChunkForSession, appendThoughtChunkForSession, appendToolCallForSession, setSelectedPendingByKey, setBoundSessionForRoot, setDrawerSessionForRoot, refreshTreeDir, refreshCurrentFileContent, refreshGitStatus, refreshManagedRoots, updateSessionRelatedFilesForKey, treeCacheKey]);
+  }, [
+    currentRootId,
+    gitDiff?.path,
+    mergeSessionItems,
+    rootSessionKey,
+    resolveRootForSessionKey,
+    appendAgentChunkForSession,
+    appendThoughtChunkForSession,
+    appendToolCallForSession,
+    setSelectedPendingByKey,
+    setBoundSessionForRoot,
+    setDrawerSessionForRoot,
+    refreshTreeDir,
+    refreshCurrentFileContent,
+    refreshGitStatus,
+    refreshManagedRoots,
+    updateSessionRelatedFilesForKey,
+    treeCacheKey,
+  ]);
 
   useEffect(() => {
     if (!currentRootId) return;
     if (pluginsLoadedByRootRef.current[currentRootId]) return;
-    void ensurePluginsLoaded(currentRootId).catch(() => {
-    });
+    void ensurePluginsLoaded(currentRootId).catch(() => {});
   }, [currentRootId, ensurePluginsLoaded]);
 
   const handleLoadOlderSessions = useCallback(async () => {
     const rootID = currentRootIdRef.current;
-    const oldest = sessionsRef.current[sessionsRef.current.length - 1]?.updated_at || "";
+    const oldest =
+      sessionsRef.current[sessionsRef.current.length - 1]?.updated_at || "";
     if (!rootID || !oldest || loadingOlderSessions) {
       return;
     }
     setLoadingOlderSessions(true);
     try {
-      const next = await sessionService.fetchSessions(rootID, { beforeTime: oldest }) as SessionItem[];
+      const next = (await sessionService.fetchSessions(rootID, {
+        beforeTime: oldest,
+      })) as SessionItem[];
       setHasMoreSessions(next.length >= 50);
       setSessions((prev) => mergeSessionItems(prev, next));
     } finally {
@@ -2626,51 +3857,82 @@ export function App() {
     didInitRef.current = true;
     let cancelled = false;
     if (isRelayPWAContext() && !isRelayNodePage()) {
-      const lastNodeID = window.localStorage.getItem(RELAY_LAST_NODE_ID_STORAGE_KEY);
+      const lastNodeID = window.localStorage.getItem(
+        RELAY_LAST_NODE_ID_STORAGE_KEY,
+      );
       if (lastNodeID) {
         window.location.replace(`/n/${lastNodeID}/`);
         return;
       }
     }
-    fetch(appPath("/api/dirs")).then(async (r) => {
-      if (!r.ok) {
-        const payload = await r.json().catch(() => ({}));
-        if (handleRelayNavigationFailure(r.status, typeof payload?.error === "string" ? payload.error : "")) {
+    fetch(appPath("/api/dirs"))
+      .then(async (r) => {
+        if (!r.ok) {
+          const payload = await r.json().catch(() => ({}));
+          if (
+            handleRelayNavigationFailure(
+              r.status,
+              typeof payload?.error === "string" ? payload.error : "",
+            )
+          ) {
+            return null;
+          }
           return null;
         }
-        return null;
-      }
-      return r.json();
-    }).then(async dirs => {
-      if (!dirs) {
-        return;
-      }
-      void refreshRelayStatus();
-      if (cancelled || !dirs.length) return;
-      const nextDirs = dirs as ManagedRootPayload[];
-      const ids = nextDirs.map((d) => d.id);
-      managedRootByIdRef.current = Object.fromEntries(nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]));
-      managedRootIdsRef.current = new Set(ids); setManagedRootIds(ids);
-      setRootEntries(mapManagedRootsToEntries(nextDirs));
-      const urlState = readURLState();
-      const lastRoot = loadLastRootId();
-      const preferredRoot = urlState.root && ids.includes(urlState.root)
-        ? urlState.root
-        : (lastRoot && ids.includes(lastRoot) ? lastRoot : ids[0]);
-      setCurrentRootId(preferredRoot);
-      setPluginQuery(urlState.pluginQuery);
-      if (urlState.session) {
-        if (cancelled) return;
-        await handleSelectSessionRef.current?.({ key: urlState.session, session_key: urlState.session, root_id: preferredRoot });
-      } else if (urlState.file) {
-        await ensurePluginsLoaded(preferredRoot);
-        if (cancelled) return;
-        actionHandlersRef.current.open({ path: urlState.file, root: preferredRoot, cursor: urlState.cursor, preservePluginQuery: true });
-      } else {
-        actionHandlersRef.current.open_dir({ path: preferredRoot, root: preferredRoot, preservePluginQuery: true, isRoot: true });
-      }
-    });
-    return () => { cancelled = true; };
+        return r.json();
+      })
+      .then(async (dirs) => {
+        if (!dirs) {
+          return;
+        }
+        void refreshRelayStatus();
+        if (cancelled || !dirs.length) return;
+        const nextDirs = dirs as ManagedRootPayload[];
+        const ids = nextDirs.map((d) => d.id);
+        managedRootByIdRef.current = Object.fromEntries(
+          nextDirs.filter((dir) => !!dir.id).map((dir) => [dir.id, dir]),
+        );
+        managedRootIdsRef.current = new Set(ids);
+        setManagedRootIds(ids);
+        setRootEntries(mapManagedRootsToEntries(nextDirs));
+        const urlState = readURLState();
+        const lastRoot = loadLastRootId();
+        const preferredRoot =
+          urlState.root && ids.includes(urlState.root)
+            ? urlState.root
+            : lastRoot && ids.includes(lastRoot)
+              ? lastRoot
+              : ids[0];
+        setCurrentRootId(preferredRoot);
+        setPluginQuery(urlState.pluginQuery);
+        if (urlState.session) {
+          if (cancelled) return;
+          await handleSelectSessionRef.current?.({
+            key: urlState.session,
+            session_key: urlState.session,
+            root_id: preferredRoot,
+          });
+        } else if (urlState.file) {
+          await ensurePluginsLoaded(preferredRoot);
+          if (cancelled) return;
+          actionHandlersRef.current.open({
+            path: urlState.file,
+            root: preferredRoot,
+            cursor: urlState.cursor,
+            preservePluginQuery: true,
+          });
+        } else {
+          actionHandlersRef.current.open_dir({
+            path: preferredRoot,
+            root: preferredRoot,
+            preservePluginQuery: true,
+            isRoot: true,
+          });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [ensurePluginsLoaded, handleRelayNavigationFailure, refreshRelayStatus]);
 
   useEffect(() => {
@@ -2695,10 +3957,23 @@ export function App() {
         return;
       }
       if (state.session) {
-        const currentSessionKey = selectedSessionRef.current?.key || selectedSessionRef.current?.session_key || "";
-        const currentSessionRoot = (selectedSessionRef.current?.root_id as string | undefined) || currentRootIdRef.current || "";
-        if (state.session !== currentSessionKey || state.root !== currentSessionRoot) {
-          void handleSelectSessionRef.current?.({ key: state.session, session_key: state.session, root_id: state.root });
+        const currentSessionKey =
+          selectedSessionRef.current?.key ||
+          selectedSessionRef.current?.session_key ||
+          "";
+        const currentSessionRoot =
+          (selectedSessionRef.current?.root_id as string | undefined) ||
+          currentRootIdRef.current ||
+          "";
+        if (
+          state.session !== currentSessionKey ||
+          state.root !== currentSessionRoot
+        ) {
+          void handleSelectSessionRef.current?.({
+            key: state.session,
+            session_key: state.session,
+            root_id: state.root,
+          });
         }
         return;
       }
@@ -2706,13 +3981,27 @@ export function App() {
         const currentPath = fileRef.current?.path || "";
         const currentRoot = currentRootIdRef.current || "";
         const currentCursor = fileCursorRef.current;
-        if (state.file !== currentPath || state.root !== currentRoot || state.cursor !== currentCursor) {
-          actionHandlers.open({ path: state.file, root: state.root, cursor: state.cursor, preservePluginQuery: true });
+        if (
+          state.file !== currentPath ||
+          state.root !== currentRoot ||
+          state.cursor !== currentCursor
+        ) {
+          actionHandlers.open({
+            path: state.file,
+            root: state.root,
+            cursor: state.cursor,
+            preservePluginQuery: true,
+          });
         }
         return;
       }
       if (fileRef.current) {
-        actionHandlers.open_dir({ path: state.root, root: state.root, preservePluginQuery: true, isRoot: true });
+        actionHandlers.open_dir({
+          path: state.root,
+          root: state.root,
+          preservePluginQuery: true,
+          isRoot: true,
+        });
       }
     }
 
@@ -2720,27 +4009,38 @@ export function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, [actionHandlers]);
 
-  const selectedRoot = (selectedSession?.root_id as string | undefined) || currentRootId || "";
-  const selectedInCurrentRoot = !!selectedSession && !!currentRootId && selectedRoot === currentRootId;
-  const selectedKey = selectedSession?.key || selectedSession?.session_key || "";
-  const boundFromSelected = selectedInCurrentRoot && selectedKey === activeBoundSessionKey
-    ? (selectedSession as any)
-    : null;
-  const boundFromCache = activeBoundSessionKey && currentRootId
-    ? (sessionCacheRef.current[rootSessionKey(currentRootId, activeBoundSessionKey)] as any)
-    : null;
+  const selectedRoot =
+    (selectedSession?.root_id as string | undefined) || currentRootId || "";
+  const selectedInCurrentRoot =
+    !!selectedSession && !!currentRootId && selectedRoot === currentRootId;
+  const selectedKey =
+    selectedSession?.key || selectedSession?.session_key || "";
+  const boundFromSelected =
+    selectedInCurrentRoot && selectedKey === activeBoundSessionKey
+      ? (selectedSession as any)
+      : null;
+  const boundFromCache =
+    activeBoundSessionKey && currentRootId
+      ? (sessionCacheRef.current[
+          rootSessionKey(currentRootId, activeBoundSessionKey)
+        ] as any)
+      : null;
   const actionBarSession = activeBoundSessionKey
-    ? ((currentSession as any) || boundFromCache || boundFromSelected)
-    : (selectedInCurrentRoot ? (selectedSession as any) : null);
-  const isBoundSessionInMain = !!activeBoundSessionKey
-    && selectedKey === activeBoundSessionKey
-    && interactionMode !== "drawer";
+    ? (currentSession as any) || boundFromCache || boundFromSelected
+    : selectedInCurrentRoot
+      ? (selectedSession as any)
+      : null;
+  const isBoundSessionInMain =
+    !!activeBoundSessionKey &&
+    selectedKey === activeBoundSessionKey &&
+    interactionMode !== "drawer";
   const canOpenSessionDrawer = !!activeBoundSessionKey && !isBoundSessionInMain;
-  const detachedBoundSession = !!activeBoundSessionKey
-    && selectedInCurrentRoot
-    && !!selectedKey
-    && selectedKey !== activeBoundSessionKey
-    && !isDrawerOpen;
+  const detachedBoundSession =
+    !!activeBoundSessionKey &&
+    selectedInCurrentRoot &&
+    !!selectedKey &&
+    selectedKey !== activeBoundSessionKey &&
+    !isDrawerOpen;
 
   const matchedPlugin = useMemo(() => {
     if (!currentRootId || !file) return null;
@@ -2764,7 +4064,14 @@ export function App() {
       readMode: "full",
       preservePluginQuery: true,
     });
-  }, [file, pluginBypass, matchedPlugin, currentRootId, pluginQuery, actionHandlers]);
+  }, [
+    file,
+    pluginBypass,
+    matchedPlugin,
+    currentRootId,
+    pluginQuery,
+    actionHandlers,
+  ]);
 
   const pluginRender = useMemo(() => {
     if (!file || pluginBypass || !matchedPlugin) return null;
@@ -2773,7 +4080,11 @@ export function App() {
       const output = pluginManagerRef.current.run(matchedPlugin, input);
       return { plugin: matchedPlugin, output, error: "" };
     } catch (err: any) {
-      return { plugin: matchedPlugin, output: null, error: String(err?.message || err || "plugin process failed") };
+      return {
+        plugin: matchedPlugin,
+        output: null,
+        error: String(err?.message || err || "plugin process failed"),
+      };
     }
   }, [file, pluginBypass, matchedPlugin, pluginQuery]);
 
@@ -2800,43 +4111,69 @@ export function App() {
   }, [pluginRender]);
 
   const selectedSessionSnapshot = useMemo(
-    () => (selectedSession ? getSessionSnapshot(selectedSession.root_id || currentRootId, selectedSession) : null),
-    [selectedSession, currentRootId, getSessionSnapshot]
+    () =>
+      selectedSession
+        ? getSessionSnapshot(
+            selectedSession.root_id || currentRootId,
+            selectedSession,
+          )
+        : null,
+    [selectedSession, currentRootId, getSessionSnapshot],
   );
 
-  const handleSelectedSessionFileClick = useCallback((path: string) => {
-    const root = (selectedSessionRef.current?.root_id as string | undefined) || currentRootIdRef.current;
-    if (!root) return;
-    const gitItem = (gitStatus?.items || []).find((item) => item.path === path);
-    if (gitItem) {
-      void openGitDiff(root, gitItem);
-      return;
-    }
-    actionHandlers.open({ path, root });
-  }, [actionHandlers, gitStatus, openGitDiff]);
+  const handleSelectedSessionFileClick = useCallback(
+    (path: string) => {
+      const root =
+        (selectedSessionRef.current?.root_id as string | undefined) ||
+        currentRootIdRef.current;
+      if (!root) return;
+      const gitItem = (gitStatus?.items || []).find(
+        (item) => item.path === path,
+      );
+      if (gitItem) {
+        void openGitDiff(root, gitItem);
+        return;
+      }
+      actionHandlers.open({ path, root });
+    },
+    [actionHandlers, gitStatus, openGitDiff],
+  );
 
   const drawerSessionSnapshot = useMemo(
-    () => (currentSession ? getSessionSnapshot(currentRootId, currentSession) : null),
-    [currentSession, currentRootId, getSessionSnapshot]
+    () =>
+      currentSession ? getSessionSnapshot(currentRootId, currentSession) : null,
+    [currentSession, currentRootId, getSessionSnapshot],
   );
 
-  const handleDrawerSessionFileClick = useCallback((path: string) => {
-    const root = currentRootIdRef.current;
-    if (!root) return;
-    const gitItem = (gitStatus?.items || []).find((item) => item.path === path);
-    if (gitItem) {
-      void openGitDiff(root, gitItem);
-      return;
-    }
-    actionHandlers.open({ path, root });
-  }, [actionHandlers, gitStatus, openGitDiff]);
+  const handleDrawerSessionFileClick = useCallback(
+    (path: string) => {
+      const root = currentRootIdRef.current;
+      if (!root) return;
+      const gitItem = (gitStatus?.items || []).find(
+        (item) => item.path === path,
+      );
+      if (gitItem) {
+        void openGitDiff(root, gitItem);
+        return;
+      }
+      actionHandlers.open({ path, root });
+    },
+    [actionHandlers, gitStatus, openGitDiff],
+  );
 
-  const currentFileScrollKey = buildFileScrollKey(file?.root || currentRootId, file?.path);
+  const currentFileScrollKey = buildFileScrollKey(
+    file?.root || currentRootId,
+    file?.path,
+  );
   const sessionView = (
     <SessionViewer
       session={selectedSessionSnapshot}
       rootId={selectedSession?.root_id || currentRootId}
-      rootPath={managedRootByIdRef.current[selectedSession?.root_id || currentRootId || ""]?.root_path || null}
+      rootPath={
+        managedRootByIdRef.current[
+          selectedSession?.root_id || currentRootId || ""
+        ]?.root_path || null
+      }
       gitFileStatsByPath={gitFileStatsByPath}
       onFileClick={handleSelectedSessionFileClick}
     />
@@ -2844,40 +4181,85 @@ export function App() {
 
   let workspaceView: React.ReactNode;
   const showGitStatusPanel = !gitDiff && !file && !!currentRootId;
-  const shouldRenderGitPanel = showGitStatusPanel && (gitStatusLoading || ((filteredGitStatus?.items.length || 0) > 0));
+  const shouldRenderGitPanel =
+    showGitStatusPanel &&
+    (gitStatusLoading || (filteredGitStatus?.items.length || 0) > 0);
   if (gitDiff) {
     workspaceView = (
       <GitDiffViewer
         diff={gitDiff}
         root={currentRootId}
         onPathClick={handleGitDiffPathClick}
-        onSessionClick={(sessionKey) => handleSessionChipClick(sessionKey, currentRootIdRef.current)}
+        onSessionClick={(sessionKey) =>
+          handleSessionChipClick(sessionKey, currentRootIdRef.current)
+        }
         onSelectionChange={handleViewerSelectionChange}
       />
     );
   } else if (file) {
     if (pluginRender && pluginRender.output) {
       workspaceView = (
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
-          <div style={{ height: "36px", borderBottom: "1px solid var(--border-color)", padding: "0 12px", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 12, color: "var(--text-secondary)" }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
+          <div
+            style={{
+              height: "36px",
+              borderBottom: "1px solid var(--border-color)",
+              padding: "0 12px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              fontSize: 12,
+              color: "var(--text-secondary)",
+            }}
+          >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span>🧩</span>
               <span>{pluginRender.plugin.name}</span>
-              {pluginLoading ? <span style={{ opacity: 0.7 }}>加载中...</span> : null}
+              {pluginLoading ? (
+                <span style={{ opacity: 0.7 }}>加载中...</span>
+              ) : null}
             </div>
             <button
               type="button"
-              onClick={() => { void switchToRawFileView(); }}
-              style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+              onClick={() => {
+                void switchToRawFileView();
+              }}
+              style={{
+                border: "1px solid var(--border-color)",
+                background: "transparent",
+                borderRadius: 6,
+                padding: "3px 8px",
+                cursor: "pointer",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+              }}
             >
               原始文件
             </button>
           </div>
-          <div className="plugin-shadcn-sandbox" style={{ ...pluginThemeVars, flex: 1, minHeight: 0, overflow: "auto", padding: 12 }}>
+          <div
+            className="plugin-shadcn-sandbox"
+            style={{
+              ...pluginThemeVars,
+              flex: 1,
+              minHeight: 0,
+              overflow: "auto",
+              padding: 12,
+            }}
+          >
             <Renderer
               key={pluginRendererKey}
               tree={pluginRender.output.tree as any}
-              initialState={(pluginRender.output.data || {}) as Record<string, unknown>}
+              initialState={
+                (pluginRender.output.data || {}) as Record<string, unknown>
+              }
               handlers={pluginHandlers}
             />
           </div>
@@ -2885,26 +4267,73 @@ export function App() {
       );
     } else {
       workspaceView = (
-        <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            flex: 1,
+            minHeight: 0,
+          }}
+        >
           {pluginBypass && matchedPlugin ? (
-            <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "var(--text-secondary)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div
+              style={{
+                borderBottom: "1px solid var(--border-color)",
+                padding: "8px 12px",
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
               <span>已切换为原始文件视图（插件：{matchedPlugin.name}）</span>
               <button
                 type="button"
-                onClick={() => { void switchToPluginView(); }}
-                style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+                onClick={() => {
+                  void switchToPluginView();
+                }}
+                style={{
+                  border: "1px solid var(--border-color)",
+                  background: "transparent",
+                  borderRadius: 6,
+                  padding: "3px 8px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                }}
               >
                 使用插件
               </button>
             </div>
           ) : null}
           {pluginRender && pluginRender.error ? (
-            <div style={{ borderBottom: "1px solid var(--border-color)", padding: "8px 12px", fontSize: 12, color: "#d97706", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>插件 {pluginRender.plugin.name} 执行失败，已回退原始视图</span>
+            <div
+              style={{
+                borderBottom: "1px solid var(--border-color)",
+                padding: "8px 12px",
+                fontSize: 12,
+                color: "#d97706",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <span>
+                插件 {pluginRender.plugin.name} 执行失败，已回退原始视图
+              </span>
               <button
                 type="button"
                 onClick={() => setPluginBypass(true)}
-                style={{ border: "1px solid var(--border-color)", background: "transparent", borderRadius: 6, padding: "3px 8px", cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}
+                style={{
+                  border: "1px solid var(--border-color)",
+                  background: "transparent",
+                  borderRadius: 6,
+                  padding: "3px 8px",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                }}
               >
                 忽略插件
               </button>
@@ -2914,13 +4343,20 @@ export function App() {
             file={file}
             isVisible={!selectedSession}
             onSelectionChange={handleViewerSelectionChange}
-            initialScrollTop={fileScrollPositionsRef.current[currentFileScrollKey] || 0}
+            initialScrollTop={
+              fileScrollPositionsRef.current[currentFileScrollKey] || 0
+            }
             onScrollTopChange={(scrollTop) => {
               if (!currentFileScrollKey) return;
               fileScrollPositionsRef.current[currentFileScrollKey] = scrollTop;
               persistFileScrollPositions(fileScrollPositionsRef.current);
             }}
-            onSessionClick={(sessionKey) => handleSessionChipClick(sessionKey, file?.root || currentRootIdRef.current)}
+            onSessionClick={(sessionKey) =>
+              handleSessionChipClick(
+                sessionKey,
+                file?.root || currentRootIdRef.current,
+              )
+            }
             onPathClick={handleFileViewerPathClick}
             onFileClick={handleFileViewerFileClick}
           />
@@ -2930,10 +4366,11 @@ export function App() {
   } else {
     workspaceView = (
       <DefaultListView
-          root={currentRootId || undefined}
-          path={selectedDir || ""}
-          entries={visibleMainEntries}
-          topContent={shouldRenderGitPanel ? (
+        root={currentRootId || undefined}
+        path={selectedDir || ""}
+        entries={visibleMainEntries}
+        topContent={
+          shouldRenderGitPanel ? (
             <GitStatusPanel
               status={filteredGitStatus}
               loading={gitStatusLoading}
@@ -2946,33 +4383,38 @@ export function App() {
                 void openGitDiff(root, item);
               }}
             />
-          ) : null}
-          showHiddenFiles={showHiddenFiles}
-          sortMode={currentDirectorySortMode}
-          sortControlValue={currentDirectorySortOverride || "inherit"}
-          onSortModeChange={(nextMode) => {
-            const rootID = currentRootIdRef.current;
-            const nextKey = getDirectorySortKey(rootID, selectedDirRef.current);
-            if (!nextKey) {
-              return;
-            }
-            setDirectorySortOverrides((prev) => {
-              if (nextMode === "inherit") {
-                if (!(nextKey in prev)) {
-                  return prev;
-                }
-                const next = { ...prev };
-                delete next[nextKey];
-                return next;
+          ) : null
+        }
+        showHiddenFiles={showHiddenFiles}
+        sortMode={currentDirectorySortMode}
+        sortControlValue={currentDirectorySortOverride || "inherit"}
+        onSortModeChange={(nextMode) => {
+          const rootID = currentRootIdRef.current;
+          const nextKey = getDirectorySortKey(rootID, selectedDirRef.current);
+          if (!nextKey) {
+            return;
+          }
+          setDirectorySortOverrides((prev) => {
+            if (nextMode === "inherit") {
+              if (!(nextKey in prev)) {
+                return prev;
               }
-              return { ...prev, [nextKey]: nextMode };
-            });
-          }}
-          onUploadFiles={handleTreeUpload}
-          onRemoveRoot={handleRemoveCurrentRoot}
-          onItemClick={(e) => e.is_dir ? actionHandlers.open_dir({ path: e.path }) : actionHandlers.open({ path: e.path })}
-          onPathClick={handleDirectoryPathClick}
-        />
+              const next = { ...prev };
+              delete next[nextKey];
+              return next;
+            }
+            return { ...prev, [nextKey]: nextMode };
+          });
+        }}
+        onUploadFiles={handleTreeUpload}
+        onRemoveRoot={handleRemoveCurrentRoot}
+        onItemClick={(e) =>
+          e.is_dir
+            ? actionHandlers.open_dir({ path: e.path })
+            : actionHandlers.open({ path: e.path })
+        }
+        onPathClick={handleDirectoryPathClick}
+      />
     );
   }
 
@@ -3092,47 +4534,449 @@ export function App() {
     return "从公网访问";
   }, [relayStatus]);
 
-  const relayActionDisabled = !currentRootId || (!relayStatus?.relay_bound && (!relayStatus?.pending_code || !relayStatus?.relay_base_url));
+  const relayActionDisabled =
+    !currentRootId ||
+    (!relayStatus?.relay_bound &&
+      (!relayStatus?.pending_code || !relayStatus?.relay_base_url));
   const showUpdateButton = shouldShowUpdateButton(updateState);
-  const updateBusy = updateSubmitting || ["downloading", "installing", "restarting"].includes((updateState.status || "").toLowerCase());
+  const updateBusy =
+    updateSubmitting ||
+    ["downloading", "installing", "restarting"].includes(
+      (updateState.status || "").toLowerCase(),
+    );
   const updateLabel = updateButtonLabel(updateState);
   const updateHelp = updateState.message || updateSummaryText(updateState);
   const updateSummary = updateSummaryText(updateState);
+  const sessionImportMenu = (
+    <div ref={importMenuRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        onClick={() => setImportMenuOpen((open) => !open)}
+        aria-label="导入外部会话"
+        style={{
+          border: "none",
+          background: "transparent",
+          color:
+            sessionListMode === "import" && externalImportAgent
+              ? "var(--text-secondary)"
+              : "#0f766e",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "34px",
+          minWidth: "34px",
+          borderRadius: "8px",
+          cursor: "pointer",
+          padding:
+            sessionListMode === "import" && externalImportAgent ? 0 : "0 2px",
+        }}
+      >
+        {sessionListMode === "import" && externalImportAgent ? (
+          <>
+            <AgentIcon
+              agentName={externalImportAgent}
+              style={{ width: "14px", height: "14px", display: "block" }}
+            />
+            <ChevronDownSmallIcon />
+          </>
+        ) : (
+          <ImportIcon />
+        )}
+      </button>
+      {importMenuOpen ? (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            width: "260px",
+            padding: "10px",
+            borderRadius: "12px",
+            border: "1px solid var(--border-color)",
+            background: "var(--menu-bg)",
+            boxShadow: "0 12px 30px rgba(15, 23, 42, 0.14)",
+            zIndex: 40,
+            display: "flex",
+            flexDirection: "column",
+            gap: "10px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px",
+              maxHeight: "180px",
+              overflow: "auto",
+            }}
+          >
+            {availableAgents.map((item) => {
+              const selected = item.name === externalImportAgent;
+              const disabled = !item.available;
+              return (
+                <button
+                  key={item.name}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return;
+                    setImportMenuOpen(false);
+                    setExternalImportAgent(item.name);
+                    setExternalSelectedKey("");
+                    void enterImportMode(item.name);
+                  }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    width: "100%",
+                    border: "1px solid transparent",
+                    background: selected
+                      ? "rgba(59, 130, 246, 0.1)"
+                      : "transparent",
+                    color: disabled
+                      ? "rgba(100, 116, 139, 0.55)"
+                      : selected
+                        ? "var(--accent-color)"
+                        : "var(--text-primary)",
+                    borderRadius: "8px",
+                    padding: "8px 10px",
+                    cursor: disabled ? "default" : "pointer",
+                    textAlign: "left",
+                    opacity: disabled ? 0.7 : 1,
+                  }}
+                >
+                  <AgentIcon
+                    agentName={item.name}
+                    style={{
+                      width: "14px",
+                      height: "14px",
+                      display: "block",
+                    }}
+                  />
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: "12px",
+                      fontWeight: 500,
+                    }}
+                  >
+                    {item.name}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "12px",
+              color: "var(--text-primary)",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={externalFilterBound}
+              onChange={(e) => setExternalFilterBound(e.target.checked)}
+            />
+            <span>隐藏已导入会话</span>
+          </label>
+        </div>
+      ) : null}
+    </div>
+  );
+  const sessionSidebar =
+    sessionListMode === "import" ? (
+      <ExternalSessionList
+        sessions={externalSessions}
+        selectedKey={externalSelectedKey}
+        selectedAgent={externalImportAgent}
+        importingKey={importingExternalSessionKey}
+        filterBound={externalFilterBound}
+        headerAction={sessionImportMenu}
+        loading={loadingExternalSessions}
+        loadingOlder={loadingOlderExternalSessions}
+        hasMore={hasMoreExternalSessions}
+        onBack={exitImportMode}
+        onSelect={(session) =>
+          setExternalSelectedKey(
+            String(session.key || session.session_key || ""),
+          )
+        }
+        onImport={(session) => {
+          void handleImportExternalSession(session);
+        }}
+        onLoadOlder={() => {
+          void handleLoadOlderExternalSessions();
+        }}
+      />
+    ) : (
+      <SessionList
+        sessions={sessions}
+        selectedKey={selectedSession?.key}
+        headerAction={sessionImportMenu}
+        onSelect={(s) => {
+          handleSelectSession(s);
+          if (isMobile) setIsRightOpen(false);
+        }}
+        onDelete={handleDeleteSession}
+        onLoadOlder={handleLoadOlderSessions}
+        loadingOlder={loadingOlderSessions}
+        hasMore={hasMoreSessions}
+      />
+    );
 
   return (
     <>
-    <AppShell
-      leftOpen={isLeftOpen} rightOpen={isRightOpen}
-      onCloseLeft={() => setIsLeftOpen(false)} onCloseRight={() => setIsRightOpen(false)}
-      sidebar={<FileTree entries={rootEntries} childrenByPath={entriesByPath} expanded={expanded} sortMode={treeSortMode} showHiddenFiles={showHiddenFiles} onSortModeChange={setTreeSortMode} onShowHiddenFilesChange={setShowHiddenFiles} selectedDirKey={selectedDirKey} selectedPath={file?.path} rootId={currentRootId} creatingRootName={creatingRootName} creatingRootBusy={creatingRootBusy} onCreateRootStart={handleCreateRootStart} onCreateRootNameChange={setCreatingRootName} onCreateRootSubmit={() => { void handleCreateRootSubmit(); }} onCreateRootCancel={handleCreateRootCancel} onSelectFile={(e, r) => { actionHandlers.open({path: e.path, root: r}); if (isMobile) setIsLeftOpen(false); }} onToggleDir={(e, r) => actionHandlers.open_dir({path: e.path, root: r, toggle: true, isRoot: e.is_root === true})} relayActionLabel={relayActionLabel} relayActionDisabled={relayActionDisabled} relayActionHelp={null} onRelayAction={handleRelayAction} updateActionLabel={showUpdateButton ? updateLabel : null} updateActionDisabled={updateBusy} updateActionHelp={showUpdateButton ? updateHelp : ""} updateActionBusy={updateBusy} updateActionSummary={showUpdateButton ? updateSummary : ""} onUpdateAction={() => { void handleStartUpdate(); }} />}
-      rightSidebar={<SessionList sessions={sessions} selectedKey={selectedSession?.key} onSelect={(s) => { handleSelectSession(s); if (isMobile) setIsRightOpen(false); }} onDelete={handleDeleteSession} onLoadOlder={handleLoadOlderSessions} loadingOlder={loadingOlderSessions} hasMore={hasMoreSessions} />}
-      main={
-        <div style={{ width: "100%", flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", position: "relative" }}>
-          {!isMobile && <div style={{ position: "absolute", top: "10px", left: isMobile ? "10px" : (isLeftOpen ? "-40px" : "10px"), right: isMobile ? "10px" : (isRightOpen ? "-40px" : "10px"), display: "flex", justifyContent: "space-between", pointerEvents: "none", zIndex: 100 }}>
-            <button onClick={() => setIsLeftOpen(!isLeftOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isLeftOpen && !isMobile ? 0 : 1 }}>📁</button>
-            <button onClick={() => setIsRightOpen(!isRightOpen)} style={{ pointerEvents: "auto", background: "var(--content-bg)", border: "1px solid var(--border-color)", borderRadius: "8px", width: "32px", height: "32px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", opacity: isRightOpen && !isMobile ? 0 : 1 }}>🕒</button>
-          </div>}
-          <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <div style={{ display: selectedSession ? "flex" : "none", flex: 1, minHeight: 0, minWidth: 0 }}>
-              {sessionView}
-            </div>
-            <div style={{ display: selectedSession ? "none" : "flex", flex: 1, minHeight: 0, minWidth: 0, flexDirection: "column" }}>
-              {workspaceView}
+      <AppShell
+        leftOpen={isLeftOpen}
+        rightOpen={isRightOpen}
+        onCloseLeft={() => setIsLeftOpen(false)}
+        onCloseRight={() => setIsRightOpen(false)}
+        sidebar={
+          <FileTree
+            entries={rootEntries}
+            childrenByPath={entriesByPath}
+            expanded={expanded}
+            sortMode={treeSortMode}
+            showHiddenFiles={showHiddenFiles}
+            onSortModeChange={setTreeSortMode}
+            onShowHiddenFilesChange={setShowHiddenFiles}
+            selectedDirKey={selectedDirKey}
+            selectedPath={file?.path}
+            rootId={currentRootId}
+            creatingRootName={creatingRootName}
+            creatingRootBusy={creatingRootBusy}
+            onCreateRootStart={handleCreateRootStart}
+            onCreateRootNameChange={setCreatingRootName}
+            onCreateRootSubmit={() => {
+              void handleCreateRootSubmit();
+            }}
+            onCreateRootCancel={handleCreateRootCancel}
+            onSelectFile={(e, r) => {
+              actionHandlers.open({ path: e.path, root: r });
+              if (isMobile) setIsLeftOpen(false);
+            }}
+            onToggleDir={(e, r) =>
+              actionHandlers.open_dir({
+                path: e.path,
+                root: r,
+                toggle: true,
+                isRoot: e.is_root === true,
+              })
+            }
+            relayActionLabel={relayActionLabel}
+            relayActionDisabled={relayActionDisabled}
+            relayActionHelp={null}
+            onRelayAction={handleRelayAction}
+            updateActionLabel={showUpdateButton ? updateLabel : null}
+            updateActionDisabled={updateBusy}
+            updateActionHelp={showUpdateButton ? updateHelp : ""}
+            updateActionBusy={updateBusy}
+            updateActionSummary={showUpdateButton ? updateSummary : ""}
+            onUpdateAction={() => {
+              void handleStartUpdate();
+            }}
+          />
+        }
+        rightSidebar={sessionSidebar}
+        main={
+          <div
+            style={{
+              width: "100%",
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              position: "relative",
+            }}
+          >
+            {!isMobile && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "10px",
+                  left: isMobile ? "10px" : isLeftOpen ? "-40px" : "10px",
+                  right: isMobile ? "10px" : isRightOpen ? "-40px" : "10px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  pointerEvents: "none",
+                  zIndex: 100,
+                }}
+              >
+                <button
+                  onClick={() => setIsLeftOpen(!isLeftOpen)}
+                  style={{
+                    pointerEvents: "auto",
+                    background: "var(--content-bg)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "8px",
+                    width: "32px",
+                    height: "32px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    opacity: isLeftOpen && !isMobile ? 0 : 1,
+                  }}
+                >
+                  📁
+                </button>
+                <button
+                  onClick={() => setIsRightOpen(!isRightOpen)}
+                  style={{
+                    pointerEvents: "auto",
+                    background: "var(--content-bg)",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "8px",
+                    width: "32px",
+                    height: "32px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                    opacity: isRightOpen && !isMobile ? 0 : 1,
+                  }}
+                >
+                  🕒
+                </button>
+              </div>
+            )}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                minWidth: 0,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+              }}
+            >
+              <div
+                style={{
+                  display: selectedSession ? "flex" : "none",
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                }}
+              >
+                {sessionView}
+              </div>
+              <div
+                style={{
+                  display: selectedSession ? "none" : "flex",
+                  flex: 1,
+                  minHeight: 0,
+                  minWidth: 0,
+                  flexDirection: "column",
+                }}
+              >
+                {workspaceView}
+              </div>
             </div>
           </div>
-        </div>
-      }
-      footer={<ActionBar status={status} agentsVersion={agentsVersion} currentRootId={currentRootId} currentSession={actionBarSession} attachedFileContext={attachedFileContext} canOpenSessionDrawer={canOpenSessionDrawer} detachedBoundSession={detachedBoundSession} onSendMessage={handleSendMessage} onCancelCurrentTurn={handleCancelCurrentTurn} onNewSession={handleNewSession} onRequestFileContext={handleRequestFileContext} onClearFileContext={handleClearFileContext} onToggleLeftSidebar={() => setIsLeftOpen((v) => !v)} onToggleRightSidebar={() => setIsRightOpen((v) => !v)} onSessionClick={() => {
-        const rootID = currentRootIdRef.current;
-        if (!activeBoundSessionKey) return;
-        const selectedKey = selectedSession?.key || selectedSession?.session_key;
-        const isBoundSessionInMain = selectedKey === activeBoundSessionKey && interactionMode !== "drawer";
-        if (isBoundSessionInMain) return;
-        setInteractionMode("drawer");
-        setDrawerOpenForRoot(rootID, !(drawerOpenByRootRef.current[rootID || ""] || false));
-      }} />}
-      drawer={<BottomSheet isOpen={isDrawerOpen} onClose={() => setDrawerOpenForRoot(currentRootIdRef.current, false)} onExpand={() => { handleSelectSession(currentSession); setDrawerOpenForRoot(currentRootIdRef.current, false); }}>{drawerSessionSnapshot ? <SessionViewer session={drawerSessionSnapshot} rootId={currentRootId} rootPath={managedRootByIdRef.current[currentRootId || ""]?.root_path || null} interactionMode="drawer" gitFileStatsByPath={gitFileStatsByPath} onFileClick={handleDrawerSessionFileClick} /> : <div style={{ padding: "40px", textAlign: "center" }}>点击蓝点或发消息开始</div>}</BottomSheet>}
-    />
+        }
+        footer={
+          <ActionBar
+            status={status}
+            agentsVersion={agentsVersion}
+            currentRootId={currentRootId}
+            currentSession={actionBarSession}
+            attachedFileContext={attachedFileContext}
+            canOpenSessionDrawer={canOpenSessionDrawer}
+            detachedBoundSession={detachedBoundSession}
+            onSendMessage={handleSendMessage}
+            onCancelCurrentTurn={handleCancelCurrentTurn}
+            onNewSession={handleNewSession}
+            onRequestFileContext={handleRequestFileContext}
+            onClearFileContext={handleClearFileContext}
+            onToggleLeftSidebar={() => setIsLeftOpen((v) => !v)}
+            onToggleRightSidebar={() => setIsRightOpen((v) => !v)}
+            onSessionClick={() => {
+              const rootID = currentRootIdRef.current;
+              if (!activeBoundSessionKey) return;
+              const selectedKey =
+                selectedSession?.key || selectedSession?.session_key;
+              const isBoundSessionInMain =
+                selectedKey === activeBoundSessionKey &&
+                interactionMode !== "drawer";
+              if (isBoundSessionInMain) return;
+              setInteractionMode("drawer");
+              setDrawerOpenForRoot(
+                rootID,
+                !(drawerOpenByRootRef.current[rootID || ""] || false),
+              );
+            }}
+          />
+        }
+        drawer={
+          <BottomSheet
+            isOpen={isDrawerOpen}
+            onClose={() =>
+              setDrawerOpenForRoot(currentRootIdRef.current, false)
+            }
+            onExpand={() => {
+              handleSelectSession(currentSession);
+              setDrawerOpenForRoot(currentRootIdRef.current, false);
+            }}
+          >
+            {drawerSessionSnapshot ? (
+              <SessionViewer
+                session={drawerSessionSnapshot}
+                rootId={currentRootId}
+                rootPath={
+                  managedRootByIdRef.current[currentRootId || ""]?.root_path ||
+                  null
+                }
+                interactionMode="drawer"
+                gitFileStatsByPath={gitFileStatsByPath}
+                onFileClick={handleDrawerSessionFileClick}
+              />
+            ) : (
+              <div style={{ padding: "40px", textAlign: "center" }}>
+                点击蓝点或发消息开始
+              </div>
+            )}
+          </BottomSheet>
+        }
+      />
     </>
+  );
+}
+
+function ImportIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      aria-hidden="true"
+    >
+      <path d="m14 12l-4-4v3H2v2h8v3m10 2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v3h2V6h12v12H6v-3H4v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2" />
+    </svg>
+  );
+}
+
+function ChevronDownSmallIcon() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
   );
 }

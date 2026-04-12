@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Session is the interface for all agent sessions.
@@ -36,6 +37,52 @@ type OpenSessionInput struct {
 	Model      string
 	Probe      bool
 	RootPath   string
+}
+
+type ExternalSessionSummary struct {
+	Agent          string    `json:"agent"`
+	AgentSessionID string    `json:"agent_session_id"`
+	Cwd            string    `json:"cwd,omitempty"`
+	FirstUserText  string    `json:"-"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type ListExternalSessionsInput struct {
+	RootPath    string
+	Agent       string
+	BeforeTime  time.Time
+	AfterTime   time.Time
+	Limit       int
+	FilterBound bool
+}
+
+type ListExternalSessionsResult struct {
+	Items []ExternalSessionSummary `json:"items"`
+}
+
+type ImportExternalSessionInput struct {
+	RootPath       string
+	Agent          string
+	AgentSessionID string
+}
+
+type ImportedExchange struct {
+	Role      string
+	Content   string
+	Timestamp time.Time
+}
+
+type ImportedExternalSession struct {
+	Agent          string
+	AgentSessionID string
+	Cwd            string
+	Exchanges      []ImportedExchange
+}
+
+type ExternalSessionImporter interface {
+	AgentName() string
+	ListExternalSessions(ctx context.Context, in ListExternalSessionsInput) (ListExternalSessionsResult, error)
+	ImportExternalSession(ctx context.Context, in ImportExternalSessionInput) (ImportedExternalSession, error)
 }
 
 type ModelInfo struct {

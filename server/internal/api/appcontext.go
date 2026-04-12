@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	"mindfs/server/internal/agent"
+	agenttypes "mindfs/server/internal/agent/types"
 	"mindfs/server/internal/api/usecase"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/relay"
@@ -34,6 +36,7 @@ type AppContext struct {
 	relatedFileListeners     []func(fs.RelatedFileEvent)
 	streamHub                *StreamHub
 	candidateRegistry        *usecase.CandidateRegistry
+	externalImporters        map[string]agenttypes.ExternalSessionImporter
 }
 
 func (s *AppContext) GetRootContext(rootID string) (*RootContext, error) {
@@ -147,6 +150,34 @@ func (s *AppContext) ReleaseFileWatcher(rootID, sessionKey string) {
 
 func (s *AppContext) GetAgentPool() *agent.Pool {
 	return s.Agents
+}
+
+func (s *AppContext) GetExternalSessionImporter(agentName string) (agenttypes.ExternalSessionImporter, error) {
+	if s.Agents == nil {
+		return nil, errors.New("agent pool not configured")
+	}
+	trimmed := strings.TrimSpace(agentName)
+	if trimmed == "" {
+		return nil, errors.New("agent required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.externalImporters == nil {
+		s.externalImporters = make(map[string]agenttypes.ExternalSessionImporter)
+	}
+	if importer, ok := s.externalImporters[trimmed]; ok && importer != nil {
+		return importer, nil
+	}
+	def, ok := s.Agents.Config().GetAgent(trimmed)
+	if !ok {
+		return nil, errors.New("agent not configured: " + trimmed)
+	}
+	importer, err := agent.NewExternalSessionImporter(def)
+	if err != nil {
+		return nil, err
+	}
+	s.externalImporters[trimmed] = importer
+	return importer, nil
 }
 
 func (s *AppContext) GetProber() *agent.Prober {

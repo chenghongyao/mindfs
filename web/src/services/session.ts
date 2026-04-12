@@ -93,6 +93,13 @@ type FetchSessionsOptions = {
   afterTime?: string;
 };
 
+export type FetchExternalSessionsOptions = {
+  beforeTime?: string;
+  afterTime?: string;
+  filterBound?: boolean;
+  limit?: number;
+};
+
 type PendingMessage = {
   id: string;
   message: Record<string, unknown>;
@@ -113,10 +120,7 @@ class SessionService {
   private readonly maxReconnectDelayMs = 30000;
   private readonly fastReconnectDelayMs = 1000;
   private readonly fastReconnectWindowMs = 10000;
-  private contextCache = new Map<
-    string,
-    { selectionKey: string }
-  >();
+  private contextCache = new Map<string, { selectionKey: string }>();
 
   constructor() {
     if (typeof window !== "undefined") {
@@ -149,7 +153,10 @@ class SessionService {
 
   connect(rootId: string) {
     this.rootId = rootId;
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
+    if (
+      this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING
+    ) {
       return;
     }
 
@@ -221,7 +228,11 @@ class SessionService {
 
   private reconnectNow() {
     if (!this.rootId) return;
-    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
+    if (
+      this.ws?.readyState === WebSocket.OPEN ||
+      this.ws?.readyState === WebSocket.CONNECTING
+    )
+      return;
     this.clearReconnectTimer();
     this.reconnectDelayMs = 1000;
     this.fastReconnectUntil = Date.now() + this.fastReconnectWindowMs;
@@ -240,7 +251,7 @@ class SessionService {
 
   private compactContext(
     sessionKey: string | undefined,
-    context?: Record<string, unknown>
+    context?: Record<string, unknown>,
   ): Record<string, unknown> | undefined {
     if (!context) return undefined;
     const next = { ...context };
@@ -264,9 +275,14 @@ class SessionService {
     if (!this.rootId) return;
     if (this.reconnectTimer) return;
     const isFastReconnect = Date.now() < this.fastReconnectUntil;
-    const delay = isFastReconnect ? this.fastReconnectDelayMs : this.reconnectDelayMs;
+    const delay = isFastReconnect
+      ? this.fastReconnectDelayMs
+      : this.reconnectDelayMs;
     if (!isFastReconnect) {
-      this.reconnectDelayMs = Math.min(this.reconnectDelayMs * 2, this.maxReconnectDelayMs);
+      this.reconnectDelayMs = Math.min(
+        this.reconnectDelayMs * 2,
+        this.maxReconnectDelayMs,
+      );
     }
     this.reconnectTimer = window.setTimeout(() => {
       this.reconnectTimer = null;
@@ -281,7 +297,12 @@ class SessionService {
     const payload = msg.payload || {};
     const sessionKey = payload.session_key as string;
     if (type === "session.accepted") {
-      const requestId = typeof payload.request_id === "string" ? payload.request_id : (typeof msg.id === "string" ? msg.id : "");
+      const requestId =
+        typeof payload.request_id === "string"
+          ? payload.request_id
+          : typeof msg.id === "string"
+            ? msg.id
+            : "";
       if (requestId) {
         this.pendingMessages.delete(requestId);
       }
@@ -371,7 +392,7 @@ class SessionService {
     agent: string,
     model?: string,
     context?: Record<string, unknown>,
-    requestId = this.createRequestId("msg")
+    requestId = this.createRequestId("msg"),
   ): Promise<boolean> {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       console.error("[Session] WebSocket not connected");
@@ -435,18 +456,23 @@ class SessionService {
     if (!rootId || !sessionKey) {
       return false;
     }
-    this.ws.send(JSON.stringify({
-      id: `ready-${Date.now()}`,
-      type: "session.ready",
-      payload: {
-        root_id: rootId,
-        session_key: sessionKey,
-      },
-    }));
+    this.ws.send(
+      JSON.stringify({
+        id: `ready-${Date.now()}`,
+        type: "session.ready",
+        payload: {
+          root_id: rootId,
+          session_key: sessionKey,
+        },
+      }),
+    );
     return true;
   }
 
-  async fetchSessions(rootId: string, options?: FetchSessionsOptions): Promise<Session[]> {
+  async fetchSessions(
+    rootId: string,
+    options?: FetchSessionsOptions,
+  ): Promise<Session[]> {
     try {
       const params = new URLSearchParams({ root: rootId });
       if (options?.beforeTime) {
@@ -467,7 +493,11 @@ class SessionService {
     }
   }
 
-  async getSession(rootId: string, sessionKey: string, seq?: number): Promise<Session | null> {
+  async getSession(
+    rootId: string,
+    sessionKey: string,
+    seq?: number,
+  ): Promise<Session | null> {
     try {
       const params = new URLSearchParams({
         root: rootId,
@@ -477,7 +507,7 @@ class SessionService {
         params.set("seq", String(seq));
       }
       const res = await fetch(
-        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}`, params)
+        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}`, params),
       );
       if (!res.ok) {
         throw new Error("Failed to get session");
@@ -490,13 +520,19 @@ class SessionService {
     }
   }
 
-  async getSessionRelatedFiles(rootId: string, sessionKey: string): Promise<RelatedFile[]> {
+  async getSessionRelatedFiles(
+    rootId: string,
+    sessionKey: string,
+  ): Promise<RelatedFile[]> {
     try {
       const params = new URLSearchParams({
         root: rootId,
       });
       const res = await fetch(
-        appURL(`/api/sessions/${encodeURIComponent(sessionKey)}/related-files`, params)
+        appURL(
+          `/api/sessions/${encodeURIComponent(sessionKey)}/related-files`,
+          params,
+        ),
       );
       if (!res.ok) {
         throw new Error("Failed to get session related files");
@@ -514,7 +550,7 @@ class SessionService {
       const params = new URLSearchParams({ root: rootId });
       const res = await fetch(
         appURL(`/api/sessions/${encodeURIComponent(sessionKey)}`, params),
-        { method: "DELETE" }
+        { method: "DELETE" },
       );
       if (!res.ok) {
         throw new Error("Failed to delete session");
@@ -523,6 +559,67 @@ class SessionService {
     } catch (err) {
       console.error("[Session] Failed to delete session:", err);
       return false;
+    }
+  }
+
+  async fetchExternalSessions(
+    rootId: string,
+    agent: string,
+    options?: FetchExternalSessionsOptions,
+  ): Promise<Session[]> {
+    try {
+      if (!rootId || !agent) {
+        return [];
+      }
+      const params = new URLSearchParams({ root: rootId, agent });
+      if (options?.beforeTime) {
+        params.set("before_time", options.beforeTime);
+      }
+      if (options?.afterTime) {
+        params.set("after_time", options.afterTime);
+      }
+      if (options?.filterBound) {
+        params.set("filter_bound", "true");
+      }
+      if (typeof options?.limit === "number" && options.limit > 0) {
+        params.set("limit", String(options.limit));
+      }
+      const res = await fetch(appURL("/api/sessions/external", params));
+      if (!res.ok) {
+        throw new Error("Failed to fetch external sessions");
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (err) {
+      console.error("[Session] Failed to fetch external sessions:", err);
+      return [];
+    }
+  }
+
+  async importExternalSession(
+    rootId: string,
+    agent: string,
+    agentSessionId: string,
+  ): Promise<{ session_key: string } | null> {
+    try {
+      const res = await fetch(appURL("/api/sessions/import"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          root_id: rootId,
+          agent,
+          agent_session_id: agentSessionId,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to import external session");
+      }
+      return await res.json();
+    } catch (err) {
+      console.error("[Session] Failed to import external session:", err);
+      return null;
     }
   }
 }
@@ -554,8 +651,12 @@ function openSessionDB(): Promise<IDBDatabase> {
     return sessionDBPromise;
   }
   sessionDBPromise = new Promise((resolve, reject) => {
-    const request = window.indexedDB.open(SESSION_CACHE_DB, SESSION_CACHE_VERSION);
-    request.onerror = () => reject(request.error || new Error("failed to open indexeddb"));
+    const request = window.indexedDB.open(
+      SESSION_CACHE_DB,
+      SESSION_CACHE_VERSION,
+    );
+    request.onerror = () =>
+      reject(request.error || new Error("failed to open indexeddb"));
     request.onupgradeneeded = () => {
       const db = request.result;
       if (db.objectStoreNames.contains(SESSION_CACHE_STORE)) {
@@ -571,18 +672,24 @@ function openSessionDB(): Promise<IDBDatabase> {
 function sessionRequestToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error || new Error("indexeddb request failed"));
+    request.onerror = () =>
+      reject(request.error || new Error("indexeddb request failed"));
   });
 }
 
-function withSessionStore<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => Promise<T>): Promise<T> {
+function withSessionStore<T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => Promise<T>,
+): Promise<T> {
   return openSessionDB().then((db) => {
     const tx = db.transaction(SESSION_CACHE_STORE, mode);
     const store = tx.objectStore(SESSION_CACHE_STORE);
     const completion = new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error || new Error("indexeddb transaction failed"));
-      tx.onabort = () => reject(tx.error || new Error("indexeddb transaction aborted"));
+      tx.onerror = () =>
+        reject(tx.error || new Error("indexeddb transaction failed"));
+      tx.onabort = () =>
+        reject(tx.error || new Error("indexeddb transaction aborted"));
     });
     return run(store).then(async (result) => {
       await completion;
@@ -607,15 +714,28 @@ function preferIncomingText(next?: string, prev?: string) {
   return prev;
 }
 
-function withSessionMeta(base: Session | null | undefined, incoming: Session | null | undefined): Session | null {
+function withSessionMeta(
+  base: Session | null | undefined,
+  incoming: Session | null | undefined,
+): Session | null {
   if (!base && !incoming) {
     return null;
   }
   if (!base) {
-    return incoming ? { ...incoming, exchanges: Array.isArray(incoming.exchanges) ? [...incoming.exchanges] : [] } : null;
+    return incoming
+      ? {
+          ...incoming,
+          exchanges: Array.isArray(incoming.exchanges)
+            ? [...incoming.exchanges]
+            : [],
+        }
+      : null;
   }
   if (!incoming) {
-    return { ...base, exchanges: Array.isArray(base.exchanges) ? [...base.exchanges] : [] };
+    return {
+      ...base,
+      exchanges: Array.isArray(base.exchanges) ? [...base.exchanges] : [],
+    };
   }
   return {
     ...base,
@@ -627,23 +747,41 @@ function withSessionMeta(base: Session | null | undefined, incoming: Session | n
   };
 }
 
-function appendSessionDelta(base: Session | null | undefined, incoming: Session | null | undefined): Session | null {
+function appendSessionDelta(
+  base: Session | null | undefined,
+  incoming: Session | null | undefined,
+): Session | null {
   const baseWithMeta = withSessionMeta(base, incoming);
   if (!baseWithMeta) {
     return null;
   }
-  const baseExchanges = Array.isArray(base?.exchanges) ? base.exchanges.filter((exchange) => Number((exchange as any)?.seq || 0) > 0) : [];
-  const incomingExchanges = Array.isArray(incoming?.exchanges) ? incoming.exchanges.filter((exchange) => Number((exchange as any)?.seq || 0) > 0) : [];
+  const baseExchanges = Array.isArray(base?.exchanges)
+    ? base.exchanges.filter(
+        (exchange) => Number((exchange as any)?.seq || 0) > 0,
+      )
+    : [];
+  const incomingExchanges = Array.isArray(incoming?.exchanges)
+    ? incoming.exchanges.filter(
+        (exchange) => Number((exchange as any)?.seq || 0) > 0,
+      )
+    : [];
   return {
     ...baseWithMeta,
     exchanges: [...baseExchanges, ...incomingExchanges],
   };
 }
 
-async function loadCachedSession(rootId: string, sessionKey: string): Promise<Session | null> {
+async function loadCachedSession(
+  rootId: string,
+  sessionKey: string,
+): Promise<Session | null> {
   try {
     const record = await withSessionStore("readonly", (store) =>
-      sessionRequestToPromise(store.get(buildSessionCacheKey(rootId, sessionKey)) as IDBRequest<CachedSessionRecord | undefined>),
+      sessionRequestToPromise(
+        store.get(buildSessionCacheKey(rootId, sessionKey)) as IDBRequest<
+          CachedSessionRecord | undefined
+        >,
+      ),
     );
     return record?.session || null;
   } catch {
@@ -651,7 +789,10 @@ async function loadCachedSession(rootId: string, sessionKey: string): Promise<Se
   }
 }
 
-async function saveCachedSession(rootId: string, session: Session | null | undefined): Promise<void> {
+async function saveCachedSession(
+  rootId: string,
+  session: Session | null | undefined,
+): Promise<void> {
   if (!rootId || !session?.key) {
     return;
   }
@@ -664,22 +805,31 @@ async function saveCachedSession(rootId: string, session: Session | null | undef
     session: persistentSession,
   };
   try {
-    await withSessionStore("readwrite", (store) => sessionRequestToPromise(store.put(record)));
-  } catch {
-  }
+    await withSessionStore("readwrite", (store) =>
+      sessionRequestToPromise(store.put(record)),
+    );
+  } catch {}
 }
 
-export async function deleteCachedSession(rootId: string, sessionKey: string): Promise<void> {
+export async function deleteCachedSession(
+  rootId: string,
+  sessionKey: string,
+): Promise<void> {
   try {
-    await withSessionStore("readwrite", (store) => sessionRequestToPromise(store.delete(buildSessionCacheKey(rootId, sessionKey))));
-  } catch {
-  }
+    await withSessionStore("readwrite", (store) =>
+      sessionRequestToPromise(
+        store.delete(buildSessionCacheKey(rootId, sessionKey)),
+      ),
+    );
+  } catch {}
 }
 
 function cloneSession(session: Session): Session {
   return {
     ...session,
-    related_files: Array.isArray(session.related_files) ? [...session.related_files] : [],
+    related_files: Array.isArray(session.related_files)
+      ? [...session.related_files]
+      : [],
     exchanges: Array.isArray(session.exchanges) ? [...session.exchanges] : [],
   };
 }
@@ -696,12 +846,19 @@ function toPersistentSession(session: Session): Session {
   };
 }
 
-export async function getCachedSession(rootId: string, sessionKey: string): Promise<Session | null> {
+export async function getCachedSession(
+  rootId: string,
+  sessionKey: string,
+): Promise<Session | null> {
   const cached = await loadCachedSession(rootId, sessionKey);
   return cached ? cloneSession(cached) : null;
 }
 
-export async function setCachedSessionRelatedFiles(rootId: string, sessionKey: string, relatedFiles: RelatedFile[]): Promise<Session | null> {
+export async function setCachedSessionRelatedFiles(
+  rootId: string,
+  sessionKey: string,
+  relatedFiles: RelatedFile[],
+): Promise<Session | null> {
   const cached = await loadCachedSession(rootId, sessionKey);
   if (!cached) {
     return null;
@@ -714,19 +871,26 @@ export async function setCachedSessionRelatedFiles(rootId: string, sessionKey: s
   return cloneSession(next);
 }
 
-export async function syncSession(rootId: string, sessionKey: string): Promise<SyncSessionResult> {
+export async function syncSession(
+  rootId: string,
+  sessionKey: string,
+): Promise<SyncSessionResult> {
   const base = await getCachedSession(rootId, sessionKey);
   const seq = getSessionMaxSeq(base);
   const incoming = await sessionService.getSession(rootId, sessionKey, seq);
   if (!incoming) {
     return { session: base, hasDelta: false };
   }
-  const incomingExchanges = Array.isArray(incoming.exchanges) ? incoming.exchanges : [];
+  const incomingExchanges = Array.isArray(incoming.exchanges)
+    ? incoming.exchanges
+    : [];
   const persistedDelta = incomingExchanges.filter((exchange) => {
     const exchangeSeq = Number((exchange as any)?.seq || 0);
     return Number.isFinite(exchangeSeq) && exchangeSeq > 0;
   });
-  const transientTail = incomingExchanges.filter((exchange) => Number((exchange as any)?.seq || 0) === 0);
+  const transientTail = incomingExchanges.filter(
+    (exchange) => Number((exchange as any)?.seq || 0) === 0,
+  );
   const persistedSession = appendSessionDelta(base, {
     ...incoming,
     key: sessionKey,

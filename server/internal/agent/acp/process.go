@@ -134,6 +134,7 @@ type UpdateType string
 
 const (
 	UpdateTypeMessageChunk UpdateType = "message_chunk"
+	UpdateTypeUserMessage  UpdateType = "user_message_chunk"
 	UpdateTypeThoughtChunk UpdateType = "thought_chunk"
 	UpdateTypeToolCall     UpdateType = "tool_call"
 	UpdateTypeToolUpdate   UpdateType = "tool_update"
@@ -624,6 +625,8 @@ func wrapSessionUpdate(sessionID string, update acp.SessionUpdate) SessionUpdate
 		Raw:       update,
 	}
 	switch {
+	case update.UserMessageChunk != nil:
+		result.Type = UpdateTypeUserMessage
 	case update.AgentMessageChunk != nil:
 		result.Type = UpdateTypeMessageChunk
 	case update.AgentThoughtChunk != nil:

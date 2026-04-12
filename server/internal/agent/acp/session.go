@@ -261,6 +261,9 @@ func (s *session) CancelCurrentTurn() error {
 func (s *session) OnUpdate(onUpdate func(types.Event)) {
 	s.proc.SetOnUpdate(s.sessionKey, func(update SessionUpdate) {
 		s.logRawToolUpdate(update)
+		if update.Type == UpdateTypeUserMessage {
+			return
+		}
 		if onUpdate != nil {
 			onUpdate(convertEvent(update))
 		}

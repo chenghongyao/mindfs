@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	agenttypes "mindfs/server/internal/agent/types"
 	"mindfs/server/internal/api/usecase"
 	"mindfs/server/internal/fs"
 	"mindfs/server/internal/session"
@@ -61,6 +62,8 @@ func (h *HTTPHandler) Routes() http.Handler {
 	r.Post("/api/upload", h.handleUpload)
 	r.Get("/api/candidates", h.handleCandidates)
 	r.Get("/api/sessions", h.handleSessions)
+	r.Get("/api/sessions/external", h.handleExternalSessionsList)
+	r.Post("/api/sessions/import", h.handleExternalSessionImport)
 	r.Get("/api/sessions/{key}", h.handleSessionGet)
 	r.Get("/api/sessions/{key}/related-files", h.handleSessionRelatedFilesGet)
 	r.Delete("/api/sessions/{key}", h.handleSessionDelete)
@@ -133,6 +136,99 @@ func (h *HTTPHandler) handleCandidates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, out.Items)
+}
+
+func (h *HTTPHandler) handleExternalSessionsList(w http.ResponseWriter, r *http.Request) {
+	rootID := strings.TrimSpace(r.URL.Query().Get("root"))
+	agentName := strings.TrimSpace(r.URL.Query().Get("agent"))
+	if rootID == "" || agentName == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root and agent are required"))
+		return
+	}
+	beforeTime, err := parseOptionalTimeQuery(r, "before_time")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	afterTime, err := parseOptionalTimeQuery(r, "after_time")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if !beforeTime.IsZero() && !afterTime.IsZero() {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("before_time and after_time are mutually exclusive"))
+		return
+	}
+	limit, err := parsePositiveIntQuery(r, "limit")
+	if err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("limit must be a positive integer"))
+		return
+	}
+	filterBound := false
+	switch strings.TrimSpace(r.URL.Query().Get("filter_bound")) {
+	case "1", "true", "TRUE", "True":
+		filterBound = true
+	}
+	uc := h.service()
+	out, err := uc.ListExternalSessions(r.Context(), usecase.ListExternalSessionsInput{
+		RootID:      rootID,
+		Agent:       agentName,
+		BeforeTime:  beforeTime,
+		AfterTime:   afterTime,
+		Limit:       limit,
+		FilterBound: filterBound,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	payload := make([]map[string]any, 0, len(out.Items))
+	for _, item := range out.Items {
+		payload = append(payload, externalSessionListResponse(item))
+	}
+	respondJSON(w, http.StatusOK, payload)
+}
+
+func (h *HTTPHandler) handleExternalSessionImport(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		RootID         string `json:"root_id"`
+		Agent          string `json:"agent"`
+		AgentSessionID string `json:"agent_session_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("invalid json body"))
+		return
+	}
+	req.RootID = strings.TrimSpace(req.RootID)
+	req.Agent = strings.TrimSpace(req.Agent)
+	req.AgentSessionID = strings.TrimSpace(req.AgentSessionID)
+	if req.RootID == "" || req.Agent == "" || req.AgentSessionID == "" {
+		respondError(w, http.StatusBadRequest, errInvalidRequest("root_id, agent, agent_session_id are required"))
+		return
+	}
+	uc := h.service()
+	out, err := uc.ImportExternalSession(r.Context(), usecase.ImportExternalSessionInput{
+		RootID:         req.RootID,
+		Agent:          req.Agent,
+		AgentSessionID: req.AgentSessionID,
+	})
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err)
+		return
+	}
+	if h.AppContext != nil {
+		h.AppContext.GetSessionStreamHub().BroadcastAll(WSResponse{
+			Type: "session.imported",
+			Payload: map[string]any{
+				"root_id":          req.RootID,
+				"session_key":      out.SessionKey,
+				"agent":            out.Agent,
+				"agent_session_id": out.AgentSessionID,
+				"imported_count":   out.ImportedCount,
+			},
+		})
+	}
+	respondJSON(w, http.StatusOK, out)
 }
 
 func (h *HTTPHandler) handleSessionGet(w http.ResponseWriter, r *http.Request) {
@@ -237,6 +333,24 @@ func sessionListResponse(s *session.Session) map[string]any {
 		"created_at": s.CreatedAt,
 		"updated_at": s.UpdatedAt,
 		"closed_at":  s.ClosedAt,
+	}
+}
+
+func externalSessionListResponse(s agenttypes.ExternalSessionSummary) map[string]any {
+	name := strings.TrimSpace(s.FirstUserText)
+	if name == "" {
+		name = s.AgentSessionID
+	}
+	return map[string]any{
+		"key":              s.AgentSessionID,
+		"type":             session.TypeChat,
+		"agent":            s.Agent,
+		"model":            "",
+		"name":             name,
+		"created_at":       s.UpdatedAt,
+		"updated_at":       s.UpdatedAt,
+		"closed_at":        nil,
+		"agent_session_id": s.AgentSessionID,
 	}
 }
 
