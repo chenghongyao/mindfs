@@ -12,6 +12,28 @@ import (
 	"time"
 )
 
+func TestGetOrCreateDeviceIDStable(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	t.Setenv("HOME", configRoot)
+
+	first, err := getOrCreateDeviceID()
+	if err != nil {
+		t.Fatalf("getOrCreateDeviceID() first error = %v", err)
+	}
+	if first == "" || !strings.HasPrefix(first, "md_") {
+		t.Fatalf("unexpected device id = %q", first)
+	}
+
+	second, err := getOrCreateDeviceID()
+	if err != nil {
+		t.Fatalf("getOrCreateDeviceID() second error = %v", err)
+	}
+	if second != first {
+		t.Fatalf("device id changed: first=%q second=%q", first, second)
+	}
+}
+
 func TestCredentialsStoreSaveLoad(t *testing.T) {
 	configRoot := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", configRoot)
@@ -99,6 +121,9 @@ func TestServicePollBind(t *testing.T) {
 		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 			if req.URL.String() != "https://relay.example.com/api/bind/poll?code=pc_live" {
 				t.Fatalf("unexpected poll URL: %s", req.URL.String())
+			}
+			if strings.TrimSpace(req.Header.Get(relayDeviceIDHeader)) == "" {
+				t.Fatal("expected device id header on bind poll request")
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,

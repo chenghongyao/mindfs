@@ -67,6 +67,9 @@ func (i *Importer) ListExternalSessions(ctx context.Context, in agenttypes.ListE
 			Cwd:    &cwd,
 		})
 		if err != nil {
+			if isUnsupportedACPListSessions(err) {
+				return agenttypes.ListExternalSessionsResult{Items: nil}, nil
+			}
 			return agenttypes.ListExternalSessionsResult{}, err
 		}
 		for _, item := range resp.Sessions {
@@ -102,6 +105,14 @@ func (i *Importer) ListExternalSessions(ctx context.Context, in agenttypes.ListE
 		cursor = &next
 	}
 	return agenttypes.ListExternalSessionsResult{Items: items}, nil
+}
+
+func isUnsupportedACPListSessions(err error) bool {
+	var reqErr *acpsdk.RequestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.Code == -32601
 }
 
 func (i *Importer) ImportExternalSession(ctx context.Context, in agenttypes.ImportExternalSessionInput) (agenttypes.ImportedExternalSession, error) {

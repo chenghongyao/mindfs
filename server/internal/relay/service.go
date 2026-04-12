@@ -27,6 +27,8 @@ const (
 	relayReconnectStableDuration = time.Minute
 )
 
+const relayDeviceIDHeader = "X-MindFS-Device-ID"
+
 type Service struct {
 	localAddr string
 	localURL  string
@@ -55,6 +57,9 @@ type BindPollResult struct {
 func NewService(localAddr string) (*Service, error) {
 	store, err := NewCredentialsStore()
 	if err != nil {
+		return nil, err
+	}
+	if _, err := getOrCreateDeviceID(); err != nil {
 		return nil, err
 	}
 	return &Service{
@@ -114,6 +119,9 @@ func (s *Service) PollBind(ctx context.Context, baseURL, pendingCode string) (Bi
 	if err != nil {
 		return BindPollResult{}, err
 	}
+	if err := s.attachDeviceID(req); err != nil {
+		return BindPollResult{}, err
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return BindPollResult{}, err
@@ -140,6 +148,20 @@ func (s *Service) PollBind(ctx context.Context, baseURL, pendingCode string) (Bi
 		}
 	}
 	return result, nil
+}
+
+func (s *Service) attachDeviceID(req *http.Request) error {
+	if s == nil || req == nil {
+		return nil
+	}
+	deviceID, err := getOrCreateDeviceID()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(deviceID) != "" {
+		req.Header.Set(relayDeviceIDHeader, deviceID)
+	}
+	return nil
 }
 
 func buildBindPollURL(baseURL, pendingCode string) (string, error) {

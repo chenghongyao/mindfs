@@ -109,6 +109,11 @@ func (s *TipsService) fetch(ctx context.Context) (*Tip, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.manager != nil && s.manager.service != nil {
+		if err := s.manager.service.attachDeviceID(req); err != nil {
+			return nil, err
+		}
+	}
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, err
