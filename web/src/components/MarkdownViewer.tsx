@@ -1,8 +1,9 @@
-import React, { memo, useEffect, useMemo, useRef } from "react";
+import React, { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import Prism from "prismjs";
+import mermaid from "mermaid";
 import "prismjs/themes/prism.css";
 // Reuse the language imports from global Prism context (since they are imported in CodeViewer, they might be available if loaded, 
 // but strictly speaking we should import them here or centralize. For simplicity, we rely on the side-effects of CodeViewer imports 
@@ -26,6 +27,107 @@ const monoFontFamily = [
   '"Courier New"',
   'monospace',
 ].join(", ");
+
+let mermaidInitialized = false;
+let mermaidRenderId = 0;
+
+function ensureMermaidInitialized() {
+  if (mermaidInitialized) return;
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "default",
+  });
+  mermaidInitialized = true;
+}
+
+function MermaidBlock({ chart }: { chart: string }) {
+  const [svg, setSvg] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const renderChart = async () => {
+      const source = chart.trim();
+      if (!source) {
+        setSvg("");
+        setError("");
+        return;
+      }
+
+      ensureMermaidInitialized();
+      const renderId = `mindfs-mermaid-${mermaidRenderId += 1}`;
+
+      try {
+        const { svg: renderedSvg } = await mermaid.render(renderId, source);
+        if (!cancelled) {
+          setSvg(renderedSvg);
+          setError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setSvg("");
+          setError(err instanceof Error ? err.message : "Failed to render Mermaid diagram.");
+        }
+      }
+    };
+
+    void renderChart();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chart]);
+
+  if (error) {
+    return (
+      <pre
+        style={{
+          width: "100%",
+          boxSizing: "border-box",
+          background: "rgba(127, 29, 29, 0.05)",
+          color: "#991b1b",
+          padding: "16px",
+          borderRadius: "10px",
+          overflow: "auto",
+          border: "1px solid rgba(239, 68, 68, 0.25)",
+          fontFamily: monoFontFamily,
+          fontSize: "13px",
+          margin: "1.5em 0",
+          lineHeight: "1.6",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {`Mermaid render error\n\n${error}\n\n${chart}`}
+      </pre>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        boxSizing: "border-box",
+        background: "rgba(0,0,0,0.02)",
+        padding: "16px",
+        borderRadius: "10px",
+        overflow: "auto",
+        border: "1px solid var(--border-color)",
+        margin: "1.5em 0",
+      }}
+    >
+      {svg ? (
+        <div
+          dangerouslySetInnerHTML={{ __html: svg }}
+          style={{ minWidth: "fit-content" }}
+        />
+      ) : (
+        <div style={{ color: "var(--text-secondary)", fontSize: "14px" }}>Rendering Mermaid diagram...</div>
+      )}
+    </div>
+  );
+}
 
 function renderDiffCode(rawContent: string) {
   const lines = rawContent.split("\n");
@@ -319,6 +421,15 @@ function MarkdownViewerInner({
             const rawContent = String(codeElement?.props?.children ?? "").replace(/\n$/, "");
             const match = /language-(\w+)/.exec(className);
             const language = match ? match[1] : "";
+
+            if (language === "mermaid") {
+              return (
+                <div {...getSourceLineProps(node)}>
+                  <MermaidBlock chart={rawContent} />
+                </div>
+              );
+            }
+
             let html = "";
             if (language && language !== "diff") {
               const grammar = Prism.languages[language] ?? Prism.languages.markup;
