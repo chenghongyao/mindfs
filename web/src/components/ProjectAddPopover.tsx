@@ -89,10 +89,19 @@ function PathBreadcrumb({
   path: string;
   onNavigate: (path: string) => void;
 }) {
-  const segments = path.split("/").filter(Boolean);
+  const isWindows = /^[A-Za-z]:/.test(path);
+  const sep = isWindows ? "\\" : "/";
+  const segments = path.split(/[\\/]/).filter((s) => s !== "");
   if (segments.length === 0) {
     return null;
   }
+  const buildPath = (upToIndex: number) => {
+    const parts = segments.slice(0, upToIndex + 1);
+    if (isWindows) {
+      return parts.join(sep) + (parts.length === 1 ? sep : "");
+    }
+    return sep + parts.join(sep);
+  };
   const visibleSegments =
     segments.length > 3 ? segments.slice(segments.length - 3) : segments;
   const hiddenCount = segments.length - visibleSegments.length;
@@ -110,7 +119,7 @@ function PathBreadcrumb({
         <>
           <button
             type="button"
-            onClick={() => onNavigate(`/${segments.slice(0, segments.length - 3).join("/")}`)}
+            onClick={() => onNavigate(buildPath(segments.length - 4))}
             style={{
               border: "none",
               background: "transparent",
@@ -130,7 +139,7 @@ function PathBreadcrumb({
       ) : null}
       {visibleSegments.map((segment, index) => {
         const absoluteIndex = hiddenCount + index;
-        const segmentPath = `/${segments.slice(0, absoluteIndex + 1).join("/")}`;
+        const segmentPath = buildPath(absoluteIndex);
         const isLast = index === visibleSegments.length - 1;
         return (
           <React.Fragment key={segmentPath}>
