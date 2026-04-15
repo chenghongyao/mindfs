@@ -105,6 +105,13 @@ func resolveStaticDir() string {
 			return candidate
 		}
 	}
+	// Fallback for development builds: serve web/dist from the current working directory.
+	if wd, err := os.Getwd(); err == nil {
+		candidate := filepath.Join(wd, "web", "dist")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
 	return ""
 }
 

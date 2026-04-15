@@ -59,7 +59,17 @@ func LoadConfig(path string) (Config, error) {
 				} else if !os.IsNotExist(readErr) {
 					return Config{}, readErr
 				} else {
-					return defaultConfig(), nil
+					// Try current working directory as a last resort (development builds).
+					if cwd, cwdErr := os.Getwd(); cwdErr == nil {
+						cwdPath := filepath.Join(cwd, "agents.json")
+						if cwdPayload, cwdReadErr := os.ReadFile(cwdPath); cwdReadErr == nil {
+							payload = cwdPayload
+						} else {
+							return defaultConfig(), nil
+						}
+					} else {
+						return defaultConfig(), nil
+					}
 				}
 			} else {
 				return defaultConfig(), nil

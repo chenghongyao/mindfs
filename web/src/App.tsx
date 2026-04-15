@@ -4930,25 +4930,22 @@ export function App() {
     if (!currentRootId) {
       return;
     }
-    const pendingPopup = openPendingPopup();
     const latestStatus = await refreshRelayStatus();
     const nextStatus = latestStatus || relayStatus;
     if (!nextStatus) {
-      pendingPopup?.close();
       return;
     }
     const nodeURL = String(nextStatus?.node_url || "");
     if (nextStatus?.relay_bound && nodeURL) {
       const target = new URL(nodeURL, window.location.origin);
       target.searchParams.set("root", currentRootId);
-      navigatePopup(pendingPopup, target.toString());
+      window.open(target.toString(), "_blank", "noopener,noreferrer");
       return;
     }
     const pendingCode = String(nextStatus?.pending_code || "");
     const nodeName = String(nextStatus?.node_name || "");
     const relayBaseURL = String(nextStatus?.relay_base_url || "");
     if (!pendingCode || !relayBaseURL) {
-      pendingPopup?.close();
       return;
     }
     const target = new URL("/bind", relayBaseURL);
@@ -4957,7 +4954,7 @@ export function App() {
     if (nodeName) {
       target.searchParams.set("node_name", nodeName);
     }
-    navigatePopup(pendingPopup, target.toString());
+    window.open(target.toString(), "_blank", "noopener,noreferrer");
   }, [currentRootId, refreshRelayStatus, relayStatus]);
 
   const relayActionLabel = useMemo(() => {
