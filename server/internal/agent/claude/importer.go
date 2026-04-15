@@ -175,7 +175,9 @@ func (i *Importer) projectDir(rootPath string) string {
 	if rootPath == "" {
 		return ""
 	}
-	return filepath.Join(i.baseDir, strings.ReplaceAll(rootPath, string(os.PathSeparator), "-"))
+	// Claude CLI uses '-' for path separators, drive colons, and spaces.
+	safeName := strings.NewReplacer(string(os.PathSeparator), "-", ":", "-", " ", "-").Replace(rootPath)
+	return filepath.Join(i.baseDir, safeName)
 }
 
 func (i *Importer) storeSessionFiles(items []claudeSessionFile) {
